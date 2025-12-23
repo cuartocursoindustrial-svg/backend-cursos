@@ -1,4 +1,4 @@
-// server.cjs - VERSIÓN ACTUALIZADA CON CORS SEGURO PARA BLOGGER
+// server.cjs - VERSIÓN CORREGIDA
 require("dotenv").config();
 
 const express = require("express");
@@ -7,122 +7,149 @@ const cors = require("cors");
 
 // Importar rutas
 const authRoutes = require("./routes/auth.cjs");
-const cursoRoutes = require("./routes/cursos.cjs"); // Nueva ruta de cursos
+const cursoRoutes = require("./routes/cursos.cjs");
 
 const app = express();
-app.use(cors());  // ← ESTA LÍNEA ES CLAVE
 
-// 🔐 CONFIGURACIÓN SEGURA DE CORS PARA BLOGGER
+// 🔐 CONFIGURACIÓN SEGURA DE CORS PARA BLOGGER - VERSIÓN SIMPLIFICADA
 const corsOptions = {
   origin: function (origin, callback) {
-    // Lista de dominios permitidos
-    const allowedOrigins = [
-      'https://academiaohara.blogspot.com',
-      'https://www.academiaohara.blogspot.com',
-      'https://academiaohara.blogspot.es',
-      'https://academiaohara.blogspot.com.ar',
-      'https://academiaohara.blogspot.mx',
-      'http://localhost:5500',      // Desarrollo local
-      'http://127.0.0.1:5500',
-      'http://localhost:3000',      // Para pruebas del frontend
-      'https://*.blogspot.com'      // Cualquier subdominio de Blogger
-    ];
-    
-    // Permitir peticiones sin origen (Postman, curl, etc.)
-    if (!origin) {
-      return callback(null, true);
-    }
-    
-    // En desarrollo, permitir cualquier origen
-    if (process.env.NODE_ENV === 'development') {
-      return callback(null, true);
-    }
-    
-    // Verificar si el origen está permitido
-    const isAllowed = allowedOrigins.some(allowed => {
-      if (allowed.includes('*')) {
-        const pattern = allowed.replace('*.', '.*\.');
-        return new RegExp(pattern).test(origin);
+    // En producción, solo permitir dominios específicos
+    if (process.env.NODE_ENV === 'production') {
+      const allowedOrigins = [
+        'https://academiaohara.blogspot.com',
+        'https://www.academiaohara.blogspot.com',
+        'https://academiaohara.blogspot.es',
+        'https://academiaohara.blogspot.com.ar',
+        'https://academiaohara.blogspot.mx',
+        'https://*.blogspot.com'
+      ];
+      
+      // Permitir sin origen (Postman, curl)
+      if (!origin) return callback(null, true);
+      
+      // Verificar origen
+      const isAllowed = allowedOrigins.some(allowed => {
+        if (allowed.includes('*')) {
+          return origin.includes('.blogspot.com');
+        }
+        return origin === allowed;
+      });
+      
+      if (isAllowed) {
+        callback(null, true);
+      } else {
+        console.log('❌ CORS bloqueado en producción para:', origin);
+        callback(new Error('Origen no permitido'));
       }
-      return origin === allowed;
-    });
-    
-    if (isAllowed) {
-      callback(null, true);
     } else {
-      console.log('❌ CORS bloqueado para origen:', origin);
-      callback(new Error('Origen no permitido por CORS'));
+      // En desarrollo, permitir todo
+      callback(null, true);
     }
   },
   credentials: true,
-  optionsSuccessStatus: 200,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
 };
 
-// MIDDLEWARES
-app.use(cors(corsOptions)); // 🔐 Usar configuración CORS segura
+// MIDDLEWARES - ORDEN CORRECTO
+app.use(cors(corsOptions)); // ✅ SOLO UNA VEZ, con las opciones
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// HEADERS DE SEGURIDAD ADICIONALES
-app.use((req, res, next) => {
-  res.setHeader('X-Content-Type-Options', 'nosniff');
-  res.setHeader('X-Frame-Options', 'DENY');
-  res.setHeader('X-XSS-Protection', '1; mode=block');
-  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
-  next();
-});
-
-// CONECTAR A MONGODB - VERSIÓN CORREGIDA
-// ✅ REMOVÍ LAS OPCIONES OBSOLETAS useNewUrlParser y useUnifiedTopology
+// CONEXIÓN MONGODB
 mongoose.connect(process.env.MONGODB_URI);
 
 const db = mongoose.connection;
-
 db.on('error', (error) => {
   console.error('❌ Error de conexión a MongoDB:', error);
 });
-
 db.once('open', () => {
   console.log('✅ Conectado a MongoDB Atlas');
   console.log('📊 Base de datos:', db.name);
 });
 
-// RUTA DE PRUEBA
+// 🔍 MIDDLEWARE PARA DEBUG (opcional)
+app.use((req, res, next) => {
+  console.log(`${new Date().toISOString()} - ${req.method} ${req.url}`);
+  console.log('Headers:', {
+    'content-type': req.headers['content-type'],
+    origin: req.headers.origin
+  });
+  next();
+});
+
+// RUTA DE PRUEBA MEJORADA
 app.get("/", (req, res) => {
   res.json({
     message: "🚀 API Academia Ohara - Backend Funcionando",
     version: "2.0.0",
-    endpoints: {
-      auth: "/api/auth",
-      cursos: "/api/cursos",
-      perfil: "/api/auth/perfil"
-    },
     status: "online",
+    environment: process.env.NODE_ENV || 'development',
+    endpoints: {
+      auth: {
+        registro: "POST /api/auth/registro",
+        login: "POST /api/auth/login",
+        perfil: "GET /api/auth/perfil"
+      },
+      cursos: {
+        todos: "GET /api/cursos",
+        crear: "POST /api/cursos",
+        detalle: "GET /api/cursos/:id"
+      }
+    },
+    timestamp: new Date().toISOString(),
+    cors: {
+      allowed: process.env.NODE_ENV === 'production' ? 'Blogger domains only' : 'All origins (dev)'
+    }
+  });
+});
+
+// RUTAS
+app.use("/api/auth", authRoutes);
+app.use("/api/cursos", cursoRoutes);
+
+// RUTA HEALTH CHECK
+app.get("/health", (req, res) => {
+  res.json({
+    status: "healthy",
+    database: mongoose.connection.readyState === 1 ? "connected" : "disconnected",
+    uptime: process.uptime(),
     timestamp: new Date().toISOString()
   });
 });
 
-// RUTAS DE LA API
-app.use("/api/auth", authRoutes);
-app.use("/api/cursos", cursoRoutes); // Nueva ruta para cursos
-
-// MANEJO DE ERRORES 404
+// 404
 app.use((req, res) => {
   res.status(404).json({
     error: "Ruta no encontrada",
     path: req.path,
-    method: req.method
+    method: req.method,
+    available_endpoints: ["/", "/health", "/api/auth", "/api/cursos"]
   });
 });
 
-// MANEJO DE ERRORES GLOBALES
+// ERROR HANDLER
 app.use((err, req, res, next) => {
-  console.error('🔥 Error del servidor:', err);
+  console.error('🔥 Error:', err.message);
   
-  if (err.name === 'UnauthorizedError') {
-    return res.status(401).json({ error: "Token inválido o expirado" });
+  if (err.name === 'JsonWebTokenError') {
+    return res.status(401).json({ error: "Token inválido" });
+  }
+  
+  if (err.name === 'TokenExpiredError') {
+    return res.status(401).json({ error: "Token expirado" });
+  }
+  
+  if (err.message === 'Origen no permitido') {
+    return res.status(403).json({ 
+      error: "CORS Error", 
+      message: "Este origen no está permitido",
+      allowed_origins: [
+        'https://academiaohara.blogspot.com',
+        'https://*.blogspot.com'
+      ]
+    });
   }
   
   res.status(500).json({
@@ -136,5 +163,5 @@ const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`🚀 Servidor escuchando en http://localhost:${PORT}`);
   console.log(`🌍 Entorno: ${process.env.NODE_ENV || 'development'}`);
-  console.log(`🔒 CORS configurado para dominios de Blogger`);
+  console.log(`🔒 CORS: ${process.env.NODE_ENV === 'production' ? 'Solo Blogger' : 'Todos los orígenes'}`);
 });
