@@ -18,10 +18,10 @@ const userSchema = new mongoose.Schema({
     type: String,
     required: true
   },
-  cursosComprados: {
-    type: [Number], // IDs de cursos comprados
-    default: []
-  },
+  cursosComprados: [{ 
+      type: mongoose.Schema.Types.ObjectId,  // ✅ CORRECTO
+      ref: 'Curso' 
+  }]
   cursosCompletados: {
     type: [Number], // IDs de cursos marcados como completados
     default: []
