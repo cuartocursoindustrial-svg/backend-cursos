@@ -9,7 +9,7 @@ const router = express.Router();
 const JWT_SECRET = process.env.JWT_SECRET || "clave-super-secreta";
 
 // REGISTRO
-router.post("/register", async (req, res) => {
+router.post("/registro", async (req, res) => {
   const { nombre, email, password } = req.body;
 
   if (!nombre || !email || !password) {
