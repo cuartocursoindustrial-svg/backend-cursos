@@ -1,4 +1,4 @@
-// models/User.cjs - VERSIÓN MEJORADA
+// models/User.cjs - VERSIÓN CORREGIDA
 const mongoose = require("mongoose");
 
 const userSchema = new mongoose.Schema({
@@ -19,13 +19,13 @@ const userSchema = new mongoose.Schema({
     required: true
   },
   cursosComprados: [{ 
-      type: mongoose.Schema.Types.ObjectId,  // ✅ CORRECTO
-      ref: 'Curso' 
-  }]
-  cursosCompletados: {
-    type: [Number], // IDs de cursos marcados como completados
-    default: []
-  },
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Curso' 
+  }],
+  cursosCompletados: [{ 
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Curso' 
+  }],
   fechaRegistro: {
     type: Date,
     default: Date.now
@@ -39,7 +39,7 @@ const userSchema = new mongoose.Schema({
     default: "U"
   }
 }, {
-  timestamps: true // Agrega createdAt y updatedAt automáticamente
+  timestamps: true
 });
 
 module.exports = mongoose.model("User", userSchema);
