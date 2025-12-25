@@ -80,6 +80,7 @@ app.use((req, res, next) => {
 });
 
 // RUTA DE PRUEBA MEJORADA
+// En server.cjs, actualiza la ruta "/"
 app.get("/", (req, res) => {
   res.json({
     message: "🚀 API Academia Ohara - Backend Funcionando",
@@ -90,7 +91,13 @@ app.get("/", (req, res) => {
       auth: {
         registro: "POST /api/auth/registro",
         login: "POST /api/auth/login",
-        perfil: "GET /api/auth/perfil"
+        perfil: "GET /api/auth/perfil",
+        agregarCurso: "POST /api/auth/agregar-curso",  // ← AÑADE ESTA
+        completarCurso: "POST /api/auth/completar-curso",
+        progreso: {
+          guardar: "POST /api/auth/progreso",
+          obtener: "GET /api/auth/progreso/:cursoId"
+        }
       },
       cursos: {
         todos: "GET /api/cursos",
