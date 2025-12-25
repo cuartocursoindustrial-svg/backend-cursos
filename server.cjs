@@ -23,6 +23,11 @@ const corsOptions = {
         'https://academiaohara.blogspot.com.ar',
         'https://academiaohara.blogspot.mx',
         'https://*.blogspot.com'
+      'http://localhost:3000',            // Desarrollo local
+      'http://localhost:8080',            // Desarrollo local
+      'http://127.0.0.1:3000',           // Localhost
+      'http://127.0.0.1:8080',           // Localhost
+      'http://localhost',                 // Localhost sin puerto
       ];
       
       // Permitir sin origen (Postman, curl)
