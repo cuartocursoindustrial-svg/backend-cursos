@@ -180,7 +180,6 @@ router.get("/perfil", authMiddleware, async (req, res) => {
   try {
     const user = await User.findById(req.user.userId)
       .select('-password') // Excluir contraseña
-      .populate('cursosComprados', 'nombre categoria descripcion precio'); // Opcional: traer info de cursos
     
     if (!user) {
       console.log('❌ Usuario no encontrado en BD:', req.user.userId);
