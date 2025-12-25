@@ -1,4 +1,4 @@
-// routes/auth.cjs - VERSIÓN MEJORADA
+// routes/auth.cjs - VERSIÓN CORREGIDA
 const express = require("express");
 const jwt = require("jsonwebtoken");
 const bcrypt = require("bcryptjs");
@@ -8,7 +8,63 @@ const Progress = require("../models/Progress.cjs");
 const router = express.Router();
 const JWT_SECRET = process.env.JWT_SECRET || "clave-super-secreta";
 
-// REGISTRO
+// =============================================
+// DEBUG: Verificar configuración
+// =============================================
+console.log('🔧 JWT_SECRET configurado:', JWT_SECRET ? 'SÍ (' + JWT_SECRET.substring(0, 3) + '...)' : 'NO (usando default)');
+
+// =============================================
+// MIDDLEWARE DE AUTENTICACIÓN CORREGIDO
+// =============================================
+function authMiddleware(req, res, next) {
+  const authHeader = req.headers.authorization;
+  
+  console.log('🔐 Headers recibidos:', req.headers);
+  console.log('🔐 Authorization header:', authHeader);
+  
+  if (!authHeader) {
+    console.log('❌ No hay header Authorization');
+    return res.status(401).json({ error: "Token de autorización requerido" });
+  }
+
+  // Verificar que tenga formato "Bearer {token}"
+  const parts = authHeader.split(' ');
+  if (parts.length !== 2 || parts[0] !== 'Bearer') {
+    console.log('❌ Formato de token inválido:', authHeader);
+    return res.status(401).json({ error: "Formato de token inválido. Use: Bearer {token}" });
+  }
+
+  const token = parts[1];
+  console.log('🔐 Token recibido:', token.substring(0, 20) + '...');
+
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET);
+    console.log('✅ Token decodificado:', decoded);
+    
+    // Asegurarnos de que req.user tenga userId
+    req.user = {
+      userId: decoded.userId || decoded.id || decoded._id,
+      email: decoded.email,
+      nombre: decoded.nombre,
+      avatar: decoded.avatar
+    };
+    
+    console.log('✅ Usuario extraído:', req.user);
+    next();
+  } catch (err) {
+    console.error("❌ Error JWT:", err.message);
+    
+    if (err.name === 'TokenExpiredError') {
+      return res.status(401).json({ error: "Token expirado" });
+    }
+    
+    return res.status(403).json({ error: "Token inválido: " + err.message });
+  }
+}
+
+// =============================================
+// REGISTRO DE USUARIO
+// =============================================
 router.post("/registro", async (req, res) => {
   const { nombre, email, password } = req.body;
 
@@ -23,20 +79,20 @@ router.post("/registro", async (req, res) => {
       nombre,
       email,
       password: hashedPassword,
-      avatarInicial: nombre.charAt(0).toUpperCase()
+      avatar: nombre.charAt(0).toUpperCase()  // CORREGIDO: avatar en lugar de avatarInicial
     });
 
-    // Crear token con más información
-    const token = jwt.sign(
-      { 
-        email: user.email, 
-        nombre: user.nombre, 
-        userId: user._id.toString(),
-        avatar: user.avatarInicial
-      },
-      JWT_SECRET,
-      { expiresIn: "7d" } // Token válido por 7 días
-    );
+    console.log('✅ Usuario creado:', user._id);
+
+    // Crear token con información completa
+    const tokenPayload = {
+      email: user.email,
+      nombre: user.nombre,
+      userId: user._id.toString(),
+      avatar: user.avatar
+    };
+    
+    const token = jwt.sign(tokenPayload, JWT_SECRET, { expiresIn: "7d" });
 
     res.json({ 
       success: true,
@@ -46,8 +102,9 @@ router.post("/registro", async (req, res) => {
         nombre: user.nombre,
         email: user.email,
         userId: user._id.toString(),
-        avatar: user.avatarInicial,
-        cursosComprados: user.cursosComprados
+        avatar: user.avatar,
+        cursosComprados: user.cursosComprados || [],
+        cursosCompletados: user.cursosCompletados || []
       }
     });
   } catch (err) {
@@ -59,18 +116,23 @@ router.post("/registro", async (req, res) => {
   }
 });
 
+// =============================================
 // LOGIN
+// =============================================
 router.post("/login", async (req, res) => {
   const { email, password } = req.body;
+  console.log('🔑 Intento de login para:', email);
 
   try {
     const user = await User.findOne({ email });
     if (!user) {
+      console.log('❌ Usuario no encontrado:', email);
       return res.status(401).json({ error: "Credenciales incorrectas" });
     }
 
     const passwordMatch = await bcrypt.compare(password, user.password);
     if (!passwordMatch) {
+      console.log('❌ Contraseña incorrecta para:', email);
       return res.status(401).json({ error: "Credenciales incorrectas" });
     }
 
@@ -78,16 +140,17 @@ router.post("/login", async (req, res) => {
     user.ultimoAcceso = new Date();
     await user.save();
 
-    const token = jwt.sign(
-      { 
-        email: user.email, 
-        nombre: user.nombre, 
-        userId: user._id.toString(),
-        avatar: user.avatarInicial
-      },
-      JWT_SECRET,
-      { expiresIn: "7d" }
-    );
+    // Crear token
+    const tokenPayload = {
+      email: user.email,
+      nombre: user.nombre,
+      userId: user._id.toString(),
+      avatar: user.avatar
+    };
+    
+    const token = jwt.sign(tokenPayload, JWT_SECRET, { expiresIn: "7d" });
+
+    console.log('✅ Login exitoso para:', email, 'Token creado');
 
     res.json({
       success: true,
@@ -97,9 +160,9 @@ router.post("/login", async (req, res) => {
         nombre: user.nombre,
         email: user.email,
         userId: user._id.toString(),
-        avatar: user.avatarInicial,
-        cursosComprados: user.cursosComprados,
-        cursosCompletados: user.cursosCompletados
+        avatar: user.avatar,
+        cursosComprados: user.cursosComprados || [],
+        cursosCompletados: user.cursosCompletados || []
       }
     });
   } catch (err) {
@@ -108,32 +171,23 @@ router.post("/login", async (req, res) => {
   }
 });
 
-// Middleware JWT (actualizado)
-function authMiddleware(req, res, next) {
-  const authHeader = req.headers.authorization;
-
-  if (!authHeader) {
-    return res.status(401).json({ error: "Token requerido" });
-  }
-
-  try {
-    const decoded = jwt.verify(authHeader, JWT_SECRET);
-    req.user = decoded;
-    next();
-  } catch (err) {
-    console.error("Error en middleware JWT:", err);
-    return res.status(403).json({ error: "Token inválido o expirado" });
-  }
-}
-
-// PERFIL
+// =============================================
+// PERFIL DEL USUARIO
+// =============================================
 router.get("/perfil", authMiddleware, async (req, res) => {
+  console.log('📋 Solicitando perfil para userId:', req.user.userId);
+  
   try {
-    const user = await User.findById(req.user.userId);
+    const user = await User.findById(req.user.userId)
+      .select('-password') // Excluir contraseña
+      .populate('cursosComprados', 'nombre categoria descripcion precio'); // Opcional: traer info de cursos
     
     if (!user) {
+      console.log('❌ Usuario no encontrado en BD:', req.user.userId);
       return res.status(404).json({ error: "Usuario no encontrado" });
     }
+
+    console.log('✅ Perfil encontrado:', user.email, 'Cursos:', user.cursosComprados.length);
 
     res.json({
       success: true,
@@ -141,47 +195,78 @@ router.get("/perfil", authMiddleware, async (req, res) => {
         nombre: user.nombre,
         email: user.email,
         userId: user._id.toString(),
-        avatar: user.avatarInicial,
-        cursosComprados: user.cursosComprados,
-        cursosCompletados: user.cursosCompletados,
+        avatar: user.avatar,
+        cursosComprados: user.cursosComprados || [],
+        cursosCompletados: user.cursosCompletados || [],
         fechaRegistro: user.fechaRegistro,
         ultimoAcceso: user.ultimoAcceso
       }
     });
   } catch (err) {
-    console.error("Error en /perfil:", err);
+    console.error("❌ Error en /perfil:", err);
     res.status(500).json({ error: "Error al obtener perfil" });
   }
 });
 
-// AGREGAR CURSO COMPRADO
+// =============================================
+// AGREGAR CURSO COMPRADO (CORREGIDO)
+// =============================================
 router.post("/agregar-curso", authMiddleware, async (req, res) => {
   const { cursoId } = req.body;
+  
+  console.log('🛒 Agregando curso:', {
+    userId: req.user.userId,
+    cursoId: cursoId
+  });
 
   if (!cursoId) {
     return res.status(400).json({ error: "ID de curso requerido" });
   }
 
   try {
+    // Verificar que el curso existe (opcional pero recomendado)
+    // const cursoExiste = await Curso.findById(cursoId);
+    // if (!cursoExiste) {
+    //   return res.status(404).json({ error: "Curso no encontrado" });
+    // }
+
     const user = await User.findById(req.user.userId);
     
-    if (!user.cursosComprados.includes(cursoId)) {
-      user.cursosComprados.push(cursoId);
-      await user.save();
+    if (!user) {
+      return res.status(404).json({ error: "Usuario no encontrado" });
     }
+
+    // Verificar si el curso ya está comprado
+    if (user.cursosComprados.includes(cursoId)) {
+      console.log('ℹ️ Curso ya comprado:', cursoId);
+      return res.json({
+        success: true,
+        message: "Ya tienes este curso comprado",
+        cursosComprados: user.cursosComprados
+      });
+    }
+
+    // Agregar el curso
+    user.cursosComprados.push(cursoId);
+    await user.save();
+    
+    console.log('✅ Curso agregado exitosamente. Total cursos:', user.cursosComprados.length);
 
     res.json({
       success: true,
       message: "Curso agregado a tu cuenta",
-      cursosComprados: user.cursosComprados
+      cursosComprados: user.cursosComprados,
+      totalCursos: user.cursosComprados.length
     });
   } catch (err) {
-    console.error("Error agregando curso:", err);
+    console.error("❌ Error agregando curso:", err);
     res.status(500).json({ error: "Error al agregar curso" });
   }
 });
 
+// =============================================
 // MARCAR CURSO COMO COMPLETADO
+// =============================================
 router.post("/completar-curso", authMiddleware, async (req, res) => {
   const { cursoId } = req.body;
 
@@ -192,15 +277,27 @@ router.post("/completar-curso", authMiddleware, async (req, res) => {
   try {
     const user = await User.findById(req.user.userId);
     
+    if (!user) {
+      return res.status(404).json({ error: "Usuario no encontrado" });
+    }
+
     // Verificar que el curso esté comprado
     if (!user.cursosComprados.includes(cursoId)) {
       return res.status(400).json({ error: "No tienes este curso comprado" });
     }
 
-    if (!user.cursosCompletados.includes(cursoId)) {
-      user.cursosCompletados.push(cursoId);
-      await user.save();
+    // Verificar si ya está completado
+    if (user.cursosCompletados.includes(cursoId)) {
+      return res.json({
+        success: true,
+        message: "El curso ya estaba marcado como completado",
+        cursosCompletados: user.cursosCompletados
+      });
     }
+
+    // Agregar a completados
+    user.cursosCompletados.push(cursoId);
+    await user.save();
 
     res.json({
       success: true,
@@ -213,7 +310,9 @@ router.post("/completar-curso", authMiddleware, async (req, res) => {
   }
 });
 
-// FUNCIONES DE PROGRESO (ya existentes)
+// =============================================
+// FUNCIONES DE PROGRESO
+// =============================================
 router.post("/progreso", authMiddleware, async (req, res) => {
   const { cursoId, leccionId } = req.body;
 
@@ -283,6 +382,24 @@ router.get("/progreso/:cursoId", authMiddleware, async (req, res) => {
     console.error("Error leyendo progreso:", err);
     res.status(500).json({ error: "Error al obtener progreso" });
   }
+});
+
+// =============================================
+// RUTA DE PRUEBA (para verificar que el servidor funciona)
+// =============================================
+router.get("/test", (req, res) => {
+  res.json({
+    success: true,
+    message: "API de autenticación funcionando",
+    timestamp: new Date().toISOString(),
+    endpoints: [
+      "POST /api/auth/registro",
+      "POST /api/auth/login", 
+      "GET /api/auth/perfil",
+      "POST /api/auth/agregar-curso",
+      "POST /api/auth/completar-curso"
+    ]
+  });
 });
 
 module.exports = router;
