@@ -33,7 +33,7 @@ function authMiddleware(req, res, next) {
 }
 
 /* ========================
-   REGISTRO
+   REGISTRO 
 ======================== */
 router.post("/registro", async (req, res) => {
   const { nombre, email, password } = req.body;
