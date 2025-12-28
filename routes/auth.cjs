@@ -89,6 +89,7 @@ router.post("/registro", async (req, res) => {
 // =============================================
 // LOGIN
 // =============================================
+// En LOGIN - verificar isVerified
 router.post("/login", async (req, res) => {
   const { email, password } = req.body;
 
@@ -98,7 +99,15 @@ router.post("/login", async (req, res) => {
       return res.status(401).json({ error: "Credenciales incorrectas" });
     }
 
-    // ✅ Como todos están auto-verificados, no checkeamos isVerified
+    // ✅ VERIFICAR SI EL EMAIL ESTÁ CONFIRMADO
+    if (!user.isVerified) {
+      return res.status(403).json({
+        error: "Cuenta no verificada",
+        needsVerification: true,  // ← Para el frontend
+        message: "Revisa tu email para verificar la cuenta"
+      });
+    }
+
     const ok = await bcrypt.compare(password, user.password);
     if (!ok) {
       return res.status(401).json({ error: "Credenciales incorrectas" });
@@ -116,9 +125,7 @@ router.post("/login", async (req, res) => {
       usuario: {
         userId: user._id.toString(),
         nombre: user.nombre,
-        email: user.email,
-        cursosComprados: user.cursosComprados,
-        cursosCompletados: user.cursosCompletados
+        email: user.email
       }
     });
 
