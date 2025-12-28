@@ -7,8 +7,8 @@ const crypto = require("crypto");
 const User = require("../models/User.cjs");
 const router = express.Router();
 
-const JWT_SECRET = process.env.JWT_SECRET || "clave-super-secreta";
-const FRONTEND_URL = process.env.FRONTEND_URL || "http://localhost:3000";
+const JWT_SECRET = process.env.JWT_SECRET;
+const FRONTEND_URL = process.env.FRONTEND_URL;
 
 // =============================================
 // MIDDLEWARE AUTH
