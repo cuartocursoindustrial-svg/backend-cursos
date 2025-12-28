@@ -2,7 +2,6 @@
   "name": "lmsbackend",
   "version": "1.0.0",
   "description": "",
-  "type": "module",
   "main": "server.cjs",
   "scripts": {
     "start": "node server.cjs"
