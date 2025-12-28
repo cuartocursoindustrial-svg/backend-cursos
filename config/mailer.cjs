@@ -1,18 +1,42 @@
-// mailer.cjs - VERSIÓN ACTIVADA
+// mailer.cjs - CON GMAIL
 const nodemailer = require("nodemailer");
 
+// Cache del transporter
+let cachedTransporter = null;
+
 module.exports = function createTransporter() {
-  // Si no hay config de email, devuelve null (modo seguro)
-  if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
-    console.warn("⚠️  Email no configurado. Usando modo sin verificación.");
+  if (cachedTransporter) return cachedTransporter;
+  
+  const emailUser = process.env.EMAIL_USER;
+  const emailPass = process.env.EMAIL_PASS;
+  
+  if (!emailUser || !emailPass) {
+    console.warn("⚠️  Email no configurado. Los emails NO se enviarán.");
     return null;
   }
 
-  return nodemailer.createTransport({
-    service: "gmail",
-    auth: {
-      user: process.env.EMAIL_USER,
-      pass: process.env.EMAIL_PASS
-    }
-  });
+  try {
+    cachedTransporter = nodemailer.createTransport({
+      service: "gmail",
+      auth: {
+        user: emailUser,
+        pass: emailPass
+      }
+    });
+    
+    // Verificar que funciona
+    cachedTransporter.verify((error) => {
+      if (error) {
+        console.error("❌ Error configuración email:", error.message);
+        cachedTransporter = null;
+      } else {
+        console.log("✅ Servicio de email listo");
+      }
+    });
+    
+    return cachedTransporter;
+  } catch (error) {
+    console.error("❌ Error creando transporter:", error.message);
+    return null;
+  }
 };
