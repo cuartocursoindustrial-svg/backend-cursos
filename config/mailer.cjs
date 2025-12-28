@@ -3,7 +3,6 @@ const nodemailer = require("nodemailer");
 
 module.exports = function createTransporter() {
   // ✅ NO LANZAR ERROR durante la carga inicial
-  // ✅ Solo verificar cuando realmente se va a enviar un email
   const emailUser = process.env.EMAIL_USER;
   const emailPass = process.env.EMAIL_PASS;
   
