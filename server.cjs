@@ -38,14 +38,23 @@ app.use(express.urlencoded({ extended: true }));
 /* ========================
    MONGODB
 ======================== */
-mongoose.connect(process.env.MONGODB_URI);
-
-mongoose.connection.on("error", err => {
-  console.error("❌ MongoDB error:", err);
+mongoose.connect(process.env.MONGODB_URI, {
+  useNewUrlParser: true,
+  useUnifiedTopology: true,
+  serverSelectionTimeoutMS: 5000,
+  socketTimeoutMS: 45000,
 });
 
-mongoose.connection.once("open", () => {
+mongoose.connection.on("connected", () => {
   console.log("✅ MongoDB conectado");
+});
+
+mongoose.connection.on("error", err => {
+  console.error("❌ MongoDB error:", err.message);
+});
+
+mongoose.connection.on("disconnected", () => {
+  console.log("⚠️ MongoDB desconectado");
 });
 
 /* ========================
