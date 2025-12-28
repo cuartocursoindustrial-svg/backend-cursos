@@ -1,15 +1,28 @@
+// mailer.cjs
 const nodemailer = require("nodemailer");
 
 module.exports = function createTransporter() {
-  if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
-    throw new Error("EMAIL_USER o EMAIL_PASS no configurados");
+  // ✅ NO LANZAR ERROR durante la carga inicial
+  // ✅ Solo verificar cuando realmente se va a enviar un email
+  const emailUser = process.env.EMAIL_USER;
+  const emailPass = process.env.EMAIL_PASS;
+  
+  // Si no hay credenciales, devolvemos null PERO NO ERROR
+  if (!emailUser || !emailPass) {
+    console.warn("⚠️  Credenciales de email no configuradas. Los emails no se enviarán.");
+    return null;
   }
 
-  return nodemailer.createTransport({
-    service: "gmail",
-    auth: {
-      user: process.env.EMAIL_USER,
-      pass: process.env.EMAIL_PASS
-    }
-  });
+  try {
+    return nodemailer.createTransport({
+      service: "gmail",
+      auth: {
+        user: emailUser,
+        pass: emailPass
+      }
+    });
+  } catch (error) {
+    console.error("❌ Error creando transporter de email:", error.message);
+    return null;
+  }
 };
