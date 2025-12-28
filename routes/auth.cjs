@@ -35,41 +35,53 @@ function authMiddleware(req, res, next) {
 }
 
 // =============================================
-// REGISTRO (SIN EMAIL TEMPORALMENTE)
+// REGISTRO (CON EMAIL)
 // =============================================
+// En el REGISTRO - mantener como está (envía email)
 router.post("/registro", async (req, res) => {
   const { nombre, email, password } = req.body;
 
-  if (!nombre || !email || !password) {
-    return res.status(400).json({ error: "Faltan datos" });
-  }
-
   try {
     const hashedPassword = await bcrypt.hash(password, 10);
+    const verificationToken = crypto.randomBytes(32).toString("hex");
+    const verificationExpires = Date.now() + 24 * 60 * 60 * 1000;
 
-    // ✅ CREAR USUARIO SIN VERIFICACIÓN POR EMAIL (por ahora)
+    // Crear usuario NO verificado
     await User.create({
       nombre,
       email,
       password: hashedPassword,
-      avatarInicial: nombre.charAt(0).toUpperCase(),
-      isVerified: true, // ← AUTO-VERIFICADO para pruebas
-      verificationToken: undefined,
-      verificationExpires: undefined
+      isVerified: false,  // ← IMPORTANTE: false
+      verificationToken,
+      verificationExpires
     });
 
-    console.log(`✅ Usuario ${email} registrado (email desactivado)`);
+    // Intentar enviar email
+    try {
+      const transporter = createTransporter();
+      if (transporter) {
+        const verificationUrl = `${FRONTEND_URL}/verify-email?token=${verificationToken}`;
+        await transporter.sendMail({
+          from: `"Academia" <${process.env.EMAIL_USER}>`,
+          to: email,
+          subject: "Verifica tu cuenta",
+          html: `<h3>Hola ${nombre}</h3><p>Verifica tu cuenta: <a href="${verificationUrl}">Click aquí</a></p>`
+        });
+        console.log(`✅ Email enviado a ${email}`);
+      }
+    } catch (emailError) {
+      console.error("⚠️  Error email:", emailError.message);
+    }
 
     res.json({
       success: true,
-      message: "Usuario registrado exitosamente"
+      message: "Registro exitoso. Revisa tu email para verificar."
     });
 
   } catch (err) {
     if (err.code === 11000) {
       return res.status(409).json({ error: "El email ya está registrado" });
     }
-    console.error(err);
     res.status(500).json({ error: "Error del servidor" });
   }
 });
