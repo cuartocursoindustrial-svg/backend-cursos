@@ -13,27 +13,21 @@ const app = express();
    CORS CONFIGURACIÓN
 ======================== */
 const corsOptions = {
-  origin: function (origin, callback) {
-    if (!origin) return callback(null, true);
-
-    if (process.env.NODE_ENV === "production") {
-      if (origin.includes(".blogspot.com")) {
-        return callback(null, true);
-      }
-      console.log("❌ CORS bloqueado:", origin);
-      return callback(new Error("Origen no permitido"));
-    }
-
-    callback(null, true);
-  },
+  origin: [
+    'https://estoesunaprueba1222135.blogspot.com',
+    'https://*.blogspot.com',
+    'http://localhost:3000',
+    'http://localhost:8080'
+  ],
   credentials: true,
   methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization"]
+  allowedHeaders: ["Content-Type", "Authorization", "Accept"]
 };
 
 app.use(cors(corsOptions));
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+
+// Agregar headers manualmente para preflight
+app.options('*', cors(corsOptions));
 
 /* ========================
    MONGODB
