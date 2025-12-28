@@ -1,4 +1,4 @@
-// models/User.cjs
+// models/User.cjs - VERSIÓN CORREGIDA
 const mongoose = require("mongoose");
 
 const userSchema = new mongoose.Schema({
@@ -37,20 +37,7 @@ const userSchema = new mongoose.Schema({
   avatarInicial: {
     type: String,
     default: "U"
-  },
-
-  // 🔐 VERIFICACIÓN DE EMAIL
-  isVerified: {
-    type: Boolean,
-    default: false
-  },
-  verificationToken: {
-    type: String
-  },
-  verificationExpires: {
-    type: Date
   }
-
 }, {
   timestamps: true
 });
