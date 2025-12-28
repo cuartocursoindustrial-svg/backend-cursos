@@ -1,22 +1,24 @@
-// mailer.cjs - CON GMAIL
+// mailer.cjs - VERSIÓN SIMPLIFICADA SIN CACHÉ
 const nodemailer = require("nodemailer");
 
-// Cache del transporter
-let cachedTransporter = null;
+console.log('📧 Mailer inicializando...');
 
 module.exports = function createTransporter() {
-  if (cachedTransporter) return cachedTransporter;
+  console.log('🔍 Mailer - Verificando variables...');
+  console.log('  EMAIL_USER:', process.env.EMAIL_USER ? '✅ (' + process.env.EMAIL_USER + ')' : '❌ No configurado');
+  console.log('  EMAIL_PASS:', process.env.EMAIL_PASS ? '✅ (' + process.env.EMAIL_PASS.length + ' chars)' : '❌ No configurado');
   
   const emailUser = process.env.EMAIL_USER;
   const emailPass = process.env.EMAIL_PASS;
   
   if (!emailUser || !emailPass) {
-    console.warn("⚠️  Email no configurado. Los emails NO se enviarán.");
+    console.warn('⚠️  Email no configurado. Skipping...');
     return null;
   }
 
   try {
-    cachedTransporter = nodemailer.createTransport({
+    console.log('🔄 Creando transporter para:', emailUser);
+    const transporter = nodemailer.createTransport({
       service: "gmail",
       auth: {
         user: emailUser,
@@ -24,19 +26,11 @@ module.exports = function createTransporter() {
       }
     });
     
-    // Verificar que funciona
-    cachedTransporter.verify((error) => {
-      if (error) {
-        console.error("❌ Error configuración email:", error.message);
-        cachedTransporter = null;
-      } else {
-        console.log("✅ Servicio de email listo");
-      }
-    });
+    console.log('✅ Transporter creado exitosamente');
+    return transporter;
     
-    return cachedTransporter;
   } catch (error) {
-    console.error("❌ Error creando transporter:", error.message);
+    console.error('❌ Error creando transporter:', error.message);
     return null;
   }
 };
