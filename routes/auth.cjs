@@ -42,37 +42,35 @@ function authMiddleware(req, res, next) {
 router.post("/registro", async (req, res) => {
   const { nombre, email, password } = req.body;
 
-  try {
-    const hashedPassword = await bcrypt.hash(password, 10);
-    const verificationToken = crypto.randomBytes(32).toString("hex");
-    const verificationExpires = Date.now() + 24 * 60 * 60 * 1000;
-
-    // Crear usuario NO verificado
-    await User.create({
-      nombre,
-      email,
-      password: hashedPassword,
-      isVerified: false,  // ← IMPORTANTE: false
-      verificationToken,
-      verificationExpires
-    });
-
-    // Intentar enviar email
-    try {
-      const transporter = createTransporter();
-      if (transporter) {
-        const verificationUrl = `${FRONTEND_URL}/verify-email?token=${verificationToken}`;
-        await transporter.sendMail({
-          from: `"Academia" <${process.env.EMAIL_USER}>`,
-          to: email,
-          subject: "Verifica tu cuenta",
-          html: `<h3>Hola ${nombre}</h3><p>Verifica tu cuenta: <a href="${verificationUrl}">Click aquí</a></p>`
-        });
-        console.log(`✅ Email enviado a ${email}`);
+      // En la ruta de registro, MODIFICA la parte de email:
+      try {
+        console.log('📧 Intentando enviar email a:', email);
+        console.log('🔗 FRONTEND_URL:', FRONTEND_URL);
+        
+        const transporter = createTransporter();
+        console.log('📧 Transporter obtenido:', transporter ? '✅ Sí' : '❌ No');
+        
+        if (transporter) {
+          const verificationUrl = `${FRONTEND_URL}/verify-email?token=${verificationToken}`;
+          console.log('🔗 URL de verificación:', verificationUrl);
+          
+          const mailOptions = {
+            from: `"Academia" <${process.env.EMAIL_USER}>`,
+            to: email,
+            subject: "Verifica tu cuenta",
+            html: `<h3>Hola ${nombre}</h3><p>Verifica tu cuenta: <a href="${verificationUrl}">Click aquí</a></p>`
+          };
+          
+          console.log('📨 Enviando email...');
+          const info = await transporter.sendMail(mailOptions);
+          console.log(`✅ Email enviado a ${email}, Message ID: ${info.messageId}`);
+        } else {
+          console.warn('⚠️  Transporter no disponible, email no enviado');
+        }
+      } catch (emailError) {
+        console.error("❌ Error enviando email:", emailError.message);
+        console.error("❌ Error completo:", emailError);
       }
-    } catch (emailError) {
-      console.error("⚠️  Error email:", emailError.message);
-    }
 
     res.json({
       success: true,
