@@ -5,9 +5,6 @@ const bcrypt = require("bcryptjs");
 const crypto = require("crypto");
 
 const User = require("../models/User.cjs");
-const Progress = require("../models/Progress.cjs");
-const createTransporter = require("../config/mailer.cjs");
-
 const router = express.Router();
 
 const JWT_SECRET = process.env.JWT_SECRET || "clave-super-secreta";
@@ -38,7 +35,7 @@ function authMiddleware(req, res, next) {
 }
 
 // =============================================
-// REGISTRO (ENVÍA EMAIL DE VERIFICACIÓN)
+// REGISTRO (SIN EMAIL TEMPORALMENTE)
 // =============================================
 router.post("/registro", async (req, res) => {
   const { nombre, email, password } = req.body;
@@ -50,161 +47,28 @@ router.post("/registro", async (req, res) => {
   try {
     const hashedPassword = await bcrypt.hash(password, 10);
 
-    const verificationToken = crypto.randomBytes(32).toString("hex");
-    const verificationExpires = Date.now() + 24 * 60 * 60 * 1000;
-
-    // ✅ CREAR USUARIO primero
-    const newUser = await User.create({
+    // ✅ CREAR USUARIO SIN VERIFICACIÓN POR EMAIL (por ahora)
+    await User.create({
       nombre,
       email,
       password: hashedPassword,
       avatarInicial: nombre.charAt(0).toUpperCase(),
-      isVerified: false,
-      verificationToken,
-      verificationExpires
+      isVerified: true, // ← AUTO-VERIFICADO para pruebas
+      verificationToken: undefined,
+      verificationExpires: undefined
     });
 
-    // ✅ ENVIAR EMAIL (manejo seguro - no bloquea si falla)
-    try {
-      const transporter = createTransporter();
-      
-      if (transporter) {
-        const verificationUrl = `${FRONTEND_URL}/verify-email?token=${verificationToken}`;
-        
-        await transporter.sendMail({
-          from: `"Academia" <${process.env.EMAIL_USER || "no-reply@academia.com"}>`,
-          to: email,
-          subject: "Verifica tu cuenta",
-          html: `
-            <h3>Hola ${nombre}</h3>
-            <p>Verifica tu cuenta haciendo clic en el enlace:</p>
-            <a href="${verificationUrl}">Verificar cuenta</a>
-            <p>Este enlace caduca en 24 horas.</p>
-          `
-        });
-        
-        console.log(`✅ Email de verificación enviado a ${email}`);
-      } else {
-        console.warn(`⚠️  Email NO enviado a ${email} (transporter no disponible)`);
-      }
-    } catch (emailError) {
-      // ✅ ERROR DE EMAIL NO AFECTA LA RESPUESTA
-      console.error("❌ Error enviando email:", emailError.message);
-      // Continuamos aunque falle el email
-    }
+    console.log(`✅ Usuario ${email} registrado (email desactivado)`);
 
-    // ✅ SIEMPRE RESPONDEMOS ÉXITO (aunque falle el email)
     res.json({
       success: true,
-      message: "Usuario registrado. Revisa tu email para verificar la cuenta."
+      message: "Usuario registrado exitosamente"
     });
 
   } catch (err) {
     if (err.code === 11000) {
       return res.status(409).json({ error: "El email ya está registrado" });
     }
-    console.error(err);
-    res.status(500).json({ error: "Error del servidor" });
-  }
-});
-
-// =============================================
-// VERIFICAR EMAIL
-// =============================================
-router.get("/verify-email", async (req, res) => {
-  const { token } = req.query;
-
-  if (!token) {
-    return res.status(400).json({ error: "Token requerido" });
-  }
-
-  try {
-    const user = await User.findOne({
-      verificationToken: token,
-      verificationExpires: { $gt: Date.now() }
-    });
-
-    if (!user) {
-      return res.status(400).json({ error: "Token inválido o expirado" });
-    }
-
-    user.isVerified = true;
-    user.verificationToken = undefined;
-    user.verificationExpires = undefined;
-    await user.save();
-
-    res.json({
-      success: true,
-      message: "Cuenta verificada correctamente"
-    });
-
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "Error del servidor" });
-  }
-});
-
-// =============================================
-// REENVIAR VERIFICACIÓN
-// =============================================
-router.post("/resend-verification", async (req, res) => {
-  const { email } = req.body;
-
-  if (!email) {
-    return res.status(400).json({ error: "Email requerido" });
-  }
-
-  try {
-    const user = await User.findOne({ email });
-
-    if (!user) {
-      return res.status(404).json({ error: "Usuario no encontrado" });
-    }
-
-    if (user.isVerified) {
-      return res.status(400).json({ error: "Cuenta ya verificada" });
-    }
-
-    const verificationToken = crypto.randomBytes(32).toString("hex");
-    const verificationExpires = Date.now() + 24 * 60 * 60 * 1000;
-
-    user.verificationToken = verificationToken;
-    user.verificationExpires = verificationExpires;
-    await user.save();
-
-    // ✅ ENVIAR EMAIL (manejo seguro)
-    try {
-      const transporter = createTransporter();
-      
-      if (transporter) {
-        const verificationUrl = `${FRONTEND_URL}/verify-email?token=${verificationToken}`;
-        
-        await transporter.sendMail({
-          from: `"Academia" <${process.env.EMAIL_USER || "no-reply@academia.com"}>`,
-          to: email,
-          subject: "Verifica tu cuenta",
-          html: `
-            <h3>Hola ${user.nombre}</h3>
-            <p>Haz clic para verificar tu cuenta:</p>
-            <a href="${verificationUrl}">Verificar cuenta</a>
-          `
-        });
-        
-        console.log(`✅ Email reenviado a ${email}`);
-      } else {
-        console.warn(`⚠️  Email NO reenviado a ${email} (transporter no disponible)`);
-      }
-    } catch (emailError) {
-      console.error("❌ Error enviando email:", emailError.message);
-      // Continuamos aunque falle el email
-    }
-
-    res.json({
-      success: true,
-      message: "Email de verificación reenviado"
-    });
-
-  } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Error del servidor" });
   }
@@ -222,13 +86,7 @@ router.post("/login", async (req, res) => {
       return res.status(401).json({ error: "Credenciales incorrectas" });
     }
 
-    if (!user.isVerified) {
-      return res.status(403).json({
-        error: "Cuenta no verificada",
-        needsVerification: true
-      });
-    }
-
+    // ✅ Como todos están auto-verificados, no checkeamos isVerified
     const ok = await bcrypt.compare(password, user.password);
     if (!ok) {
       return res.status(401).json({ error: "Credenciales incorrectas" });
@@ -270,73 +128,6 @@ router.get("/perfil", authMiddleware, async (req, res) => {
     }
 
     res.json({ success: true, usuario: user });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "Error del servidor" });
-  }
-});
-
-// =============================================
-// RESTABLECER CONTRASEÑA (OPCIONAL)
-// =============================================
-router.post("/forgot-password", async (req, res) => {
-  const { email } = req.body;
-
-  if (!email) {
-    return res.status(400).json({ error: "Email requerido" });
-  }
-
-  try {
-    const user = await User.findOne({ email });
-
-    if (!user) {
-      // Por seguridad, no revelamos si el email existe
-      return res.json({
-        success: true,
-        message: "Si el email existe, recibirás instrucciones"
-      });
-    }
-
-    // Generar token de restablecimiento
-    const resetToken = crypto.randomBytes(32).toString("hex");
-    const resetTokenExpires = Date.now() + 1 * 60 * 60 * 1000; // 1 hora
-
-    user.resetPasswordToken = resetToken;
-    user.resetPasswordExpires = resetTokenExpires;
-    await user.save();
-
-    // ✅ ENVIAR EMAIL (manejo seguro)
-    try {
-      const transporter = createTransporter();
-      
-      if (transporter) {
-        const resetUrl = `${FRONTEND_URL}/reset-password?token=${resetToken}`;
-        
-        await transporter.sendMail({
-          from: `"Academia" <${process.env.EMAIL_USER || "no-reply@academia.com"}>`,
-          to: email,
-          subject: "Restablecer contraseña",
-          html: `
-            <h3>Hola ${user.nombre}</h3>
-            <p>Para restablecer tu contraseña, haz clic en el enlace:</p>
-            <a href="${resetUrl}">Restablecer contraseña</a>
-            <p>Este enlace caduca en 1 hora.</p>
-          `
-        });
-        
-        console.log(`✅ Email de restablecimiento enviado a ${email}`);
-      } else {
-        console.warn(`⚠️  Email NO enviado a ${email} (transporter no disponible)`);
-      }
-    } catch (emailError) {
-      console.error("❌ Error enviando email de restablecimiento:", emailError.message);
-    }
-
-    res.json({
-      success: true,
-      message: "Si el email existe, recibirás instrucciones"
-    });
-
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Error del servidor" });
