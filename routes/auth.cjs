@@ -1,39 +1,8 @@
-const express = require("express");
-const jwt = require("jsonwebtoken");
-const bcrypt = require("bcryptjs");
-const crypto = require("crypto");
-
-const User = require("../models/User.cjs");
+// routes/auth.cjs - AGREGAR después del registro
 const createTransporter = require("../config/mailer.cjs");
 
-const router = express.Router();
-
-const JWT_SECRET = process.env.JWT_SECRET;
-const FRONTEND_URL = process.env.FRONTEND_URL;
-
-if (!JWT_SECRET) {
-  throw new Error("❌ JWT_SECRET no definido");
-}
-
 /* ========================
-   AUTH MIDDLEWARE
-======================== */
-function authMiddleware(req, res, next) {
-  const authHeader = req.headers.authorization;
-  if (!authHeader) return res.status(401).json({ error: "Token requerido" });
-
-  const [, token] = authHeader.split(" ");
-  try {
-    const decoded = jwt.verify(token, JWT_SECRET);
-    req.user = { userId: decoded.userId };
-    next();
-  } catch {
-    res.status(401).json({ error: "Token inválido" });
-  }
-}
-
-/* ========================
-   REGISTRO 
+   REGISTRO CON EMAIL
 ======================== */
 router.post("/registro", async (req, res) => {
   const { nombre, email, password } = req.body;
@@ -43,40 +12,75 @@ router.post("/registro", async (req, res) => {
   }
 
   try {
-    const hashed = await bcrypt.hash(password, 10);
-    const token = crypto.randomBytes(32).toString("hex");
+    // 1. Verificar si el email ya existe
+    const existe = await User.findOne({ email });
+    if (existe) {
+      return res.status(409).json({ error: "Email ya registrado" });
+    }
 
-    await User.create({
+    // 2. Encriptar contraseña
+    const hashed = await bcrypt.hash(password, 10);
+    
+    // 3. Crear token de verificación
+    const verificationToken = crypto.randomBytes(32).toString('hex');
+    
+    // 4. Crear usuario (sin verificar inicialmente)
+    const user = await User.create({
       nombre,
       email,
       password: hashed,
       isVerified: false,
-      verificationToken: token,
-      verificationExpires: Date.now() + 24 * 60 * 60 * 1000
+      verificationToken,
+      verificationExpires: Date.now() + 24 * 60 * 60 * 1000 // 24 horas
     });
-    
+
+    // 5. Enviar email de verificación
     const transporter = createTransporter();
-    if (transporter && FRONTEND_URL) {
+    if (transporter) {
+      const verificationUrl = `${process.env.FRONTEND_URL}/verify-email?token=${verificationToken}`;
+      
       await transporter.sendMail({
         to: email,
-        subject: "Verifica tu cuenta",
-        html: `<h3>Hola ${nombre},</h3>
-               <p>Verifica tu cuenta: <a href="${FRONTEND_URL}/verify-email?token=${verificationToken}">Click aquí</a></p>`
+        subject: "Verifica tu cuenta - Academia Ohara",
+        html: `
+          <h2>¡Bienvenido a Academia Ohara, ${nombre}!</h2>
+          <p>Por favor verifica tu cuenta haciendo clic en el siguiente enlace:</p>
+          <p><a href="${verificationUrl}" style="
+            background-color: #4CAF50;
+            color: white;
+            padding: 10px 20px;
+            text-decoration: none;
+            border-radius: 5px;
+            display: inline-block;
+          ">Verificar Cuenta</a></p>
+          <p>O copia esta URL en tu navegador:</p>
+          <p>${verificationUrl}</p>
+          <p>Este enlace expira en 24 horas.</p>
+          <br>
+          <p>Saludos,<br>El equipo de Academia Ohara</p>
+        `
       });
+      
+      console.log(`📧 Email de verificación enviado a: ${email}`);
+    } else {
+      console.warn("⚠️ No se pudo enviar email (transporter no disponible)");
     }
 
-
+    // 6. Responder al frontend
     res.json({
       success: true,
-      message: "Registro exitoso. Revisa tu email."
+      message: "Registro exitoso. Revisa tu email para verificar tu cuenta.",
+      usuario: {
+        id: user._id,
+        nombre: user.nombre,
+        email: user.email,
+        isVerified: false
+      }
     });
 
   } catch (err) {
-    if (err.code === 11000) {
-      return res.status(409).json({ error: "Email ya registrado" });
-    }
-    console.error(err);
-    res.status(500).json({ error: "Error servidor" });
+    console.error("❌ Error en registro:", err);
+    res.status(500).json({ error: "Error en el servidor" });
   }
 });
 
@@ -84,89 +88,37 @@ router.post("/registro", async (req, res) => {
    VERIFICAR EMAIL
 ======================== */
 router.get("/verify-email", async (req, res) => {
-  const { token } = req.query;
+  try {
+    const { token } = req.query;
 
-  const user = await User.findOne({
-    verificationToken: token,
-    verificationExpires: { $gt: Date.now() }
-  });
-
-  if (!user) {
-    return res.status(400).json({ error: "Token inválido o expirado" });
-  }
-
-  user.isVerified = true;
-  user.verificationToken = undefined;
-  user.verificationExpires = undefined;
-  await user.save();
-
-  res.json({ success: true, message: "Cuenta verificada correctamente" });
-});
-
-/* ========================
-   LOGIN
-======================== */
-router.post("/login", async (req, res) => {
-  const { email, password } = req.body;
-
-  const user = await User.findOne({ email });
-  if (!user) return res.status(401).json({ error: "Credenciales incorrectas" });
-
-  if (!user.isVerified) {
-    return res.status(403).json({ error: "Cuenta no verificada" });
-  }
-
-  const ok = await bcrypt.compare(password, user.password);
-  if (!ok) return res.status(401).json({ error: "Credenciales incorrectas" });
-
-  const token = jwt.sign(
-    { userId: user._id.toString() },
-    JWT_SECRET,
-    { expiresIn: "7d" }
-  );
-
-  res.json({
-    success: true,
-    token,
-    usuario: {
-      id: user._id,
-      nombre: user.nombre,
-      email: user.email
+    if (!token) {
+      return res.status(400).json({ error: "Token requerido" });
     }
-  });
-});
 
-/* ========================
-   PERFIL
-======================== */
-router.get("/perfil", authMiddleware, async (req, res) => {
-  const user = await User.findById(req.user.userId).select("-password");
-  res.json({ success: true, usuario: user });
-});
+    const user = await User.findOne({
+      verificationToken: token,
+      verificationExpires: { $gt: Date.now() }
+    });
 
-const mongoose = require("mongoose");
+    if (!user) {
+      return res.status(400).json({ 
+        error: "Token inválido o expirado" 
+      });
+    }
 
-const progressSchema = new mongoose.Schema({
-  userId: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: "User",
-    required: true
-  },
-  cursoId: {
-    type: String,
-    required: true
-  },
-  leccionesVistas: {
-    type: [String],
-    default: []
-  },
-  ultimaLeccion: {
-    type: String
+    // Marcar como verificado
+    user.isVerified = true;
+    user.verificationToken = undefined;
+    user.verificationExpires = undefined;
+    await user.save();
+
+    res.json({ 
+      success: true, 
+      message: "¡Cuenta verificada correctamente! Ya puedes iniciar sesión." 
+    });
+
+  } catch (error) {
+    console.error("❌ Error verificando email:", error);
+    res.status(500).json({ error: "Error verificando email" });
   }
-}, {
-  timestamps: true
 });
-
-module.exports = mongoose.model("Progress", progressSchema);
-
-module.exports = router;
