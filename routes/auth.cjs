@@ -8,6 +8,7 @@ const Progress = require("../models/Progress.cjs");
 const createTransporter = require("../config/mailer.cjs");
 
 const router = express.Router();
+
 const JWT_SECRET = process.env.JWT_SECRET || "clave-super-secreta";
 const FRONTEND_URL = process.env.FRONTEND_URL || "http://localhost:3000";
 
@@ -51,7 +52,7 @@ router.post("/registro", async (req, res) => {
     const verificationToken = crypto.randomBytes(32).toString("hex");
     const verificationExpires = Date.now() + 24 * 60 * 60 * 1000;
 
-    const user = await User.create({
+    await User.create({
       nombre,
       email,
       password: hashedPassword,
@@ -63,6 +64,8 @@ router.post("/registro", async (req, res) => {
 
     const verificationUrl =
       `${FRONTEND_URL}/verify-email?token=${verificationToken}`;
+
+    const transporter = createTransporter();
 
     await transporter.sendMail({
       from: '"Academia" <no-reply@academia.com>',
@@ -86,7 +89,7 @@ router.post("/registro", async (req, res) => {
       return res.status(409).json({ error: "El email ya está registrado" });
     }
     console.error(err);
-    res.status(500).json({ error: "Error en el servidor" });
+    res.status(500).json({ error: "Error del servidor" });
   }
 });
 
@@ -157,6 +160,8 @@ router.post("/resend-verification", async (req, res) => {
     const verificationUrl =
       `${FRONTEND_URL}/verify-email?token=${verificationToken}`;
 
+    const transporter = createTransporter();
+
     await transporter.sendMail({
       from: '"Academia" <no-reply@academia.com>',
       to: email,
@@ -180,7 +185,7 @@ router.post("/resend-verification", async (req, res) => {
 });
 
 // =============================================
-// LOGIN (BLOQUEA SI NO VERIFICADO)
+// LOGIN
 // =============================================
 router.post("/login", async (req, res) => {
   const { email, password } = req.body;
@@ -213,9 +218,9 @@ router.post("/login", async (req, res) => {
       success: true,
       token,
       usuario: {
+        userId: user._id.toString(),
         nombre: user.nombre,
         email: user.email,
-        userId: user._id.toString(),
         cursosComprados: user.cursosComprados,
         cursosCompletados: user.cursosCompletados
       }
@@ -232,6 +237,7 @@ router.post("/login", async (req, res) => {
 // =============================================
 router.get("/perfil", authMiddleware, async (req, res) => {
   const user = await User.findById(req.user.userId).select("-password");
+
   if (!user) {
     return res.status(404).json({ error: "Usuario no encontrado" });
   }
