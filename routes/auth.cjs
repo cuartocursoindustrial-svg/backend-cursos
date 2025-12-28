@@ -54,20 +54,17 @@ router.post("/registro", async (req, res) => {
       verificationToken: token,
       verificationExpires: Date.now() + 24 * 60 * 60 * 1000
     });
-
+    
     const transporter = createTransporter();
-
     if (transporter && FRONTEND_URL) {
-      const url = `${FRONTEND_URL}/verify-email?token=${token}`;
-
       await transporter.sendMail({
-        from: `"Academia Ohara" <${process.env.EMAIL_USER}>`,
         to: email,
         subject: "Verifica tu cuenta",
-        html: `<p>Hola ${nombre},</p>
-               <p><a href="${url}">Verificar cuenta</a></p>`
+        html: `<h3>Hola ${nombre},</h3>
+               <p>Verifica tu cuenta: <a href="${FRONTEND_URL}/verify-email?token=${verificationToken}">Click aquí</a></p>`
       });
     }
+
 
     res.json({
       success: true,
