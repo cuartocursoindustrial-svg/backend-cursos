@@ -1,11 +1,11 @@
-// auth.cjs
+// auth.cjs - VERSIÓN SIMPLIFICADA Y CORREGIDA
 const express = require("express");
 const jwt = require("jsonwebtoken");
 const bcrypt = require("bcryptjs");
 const crypto = require("crypto");
 
 const User = require("../models/User.cjs");
-const createTransporter = require("../config/mailer.cjs"); 
+const createTransporter = require("../config/mailer.cjs");
 const router = express.Router();
 
 const JWT_SECRET = process.env.JWT_SECRET;
@@ -16,10 +16,7 @@ const FRONTEND_URL = process.env.FRONTEND_URL;
 // =============================================
 function authMiddleware(req, res, next) {
   const authHeader = req.headers.authorization;
-
-  if (!authHeader) {
-    return res.status(401).json({ error: "Token requerido" });
-  }
+  if (!authHeader) return res.status(401).json({ error: "Token requerido" });
 
   const [type, token] = authHeader.split(" ");
   if (type !== "Bearer" || !token) {
@@ -38,39 +35,49 @@ function authMiddleware(req, res, next) {
 // =============================================
 // REGISTRO (CON EMAIL)
 // =============================================
-// En el REGISTRO - mantener como está (envía email)
 router.post("/registro", async (req, res) => {
   const { nombre, email, password } = req.body;
 
-      // En la ruta de registro, MODIFICA la parte de email:
-      try {
-        console.log('📧 Intentando enviar email a:', email);
-        console.log('🔗 FRONTEND_URL:', FRONTEND_URL);
+  if (!nombre || !email || !password) {
+    return res.status(400).json({ error: "Faltan datos" });
+  }
+
+  try {
+    const hashedPassword = await bcrypt.hash(password, 10);
+    const verificationToken = crypto.randomBytes(32).toString("hex");
+    const verificationExpires = Date.now() + 24 * 60 * 60 * 1000;
+
+    await User.create({
+      nombre,
+      email,
+      password: hashedPassword,
+      isVerified: false,
+      verificationToken,
+      verificationExpires
+    });
+
+    // ENVIAR EMAIL
+    console.log("📧 Intentando enviar email a:", email);
+    
+    try {
+      const transporter = createTransporter();
+      if (transporter && FRONTEND_URL) {
+        const verificationUrl = `${FRONTEND_URL}/verify-email?token=${verificationToken}`;
         
-        const transporter = createTransporter();
-        console.log('📧 Transporter obtenido:', transporter ? '✅ Sí' : '❌ No');
+        await transporter.sendMail({
+          from: `"Academia" <${process.env.EMAIL_USER}>`,
+          to: email,
+          subject: "Verifica tu cuenta",
+          html: `<h3>Hola ${nombre}</h3><p>Verifica tu cuenta: <a href="${verificationUrl}">Click aquí</a></p>`
+        });
         
-        if (transporter) {
-          const verificationUrl = `${FRONTEND_URL}/verify-email?token=${verificationToken}`;
-          console.log('🔗 URL de verificación:', verificationUrl);
-          
-          const mailOptions = {
-            from: `"Academia" <${process.env.EMAIL_USER}>`,
-            to: email,
-            subject: "Verifica tu cuenta",
-            html: `<h3>Hola ${nombre}</h3><p>Verifica tu cuenta: <a href="${verificationUrl}">Click aquí</a></p>`
-          };
-          
-          console.log('📨 Enviando email...');
-          const info = await transporter.sendMail(mailOptions);
-          console.log(`✅ Email enviado a ${email}, Message ID: ${info.messageId}`);
-        } else {
-          console.warn('⚠️  Transporter no disponible, email no enviado');
-        }
-      } catch (emailError) {
-        console.error("❌ Error enviando email:", emailError.message);
-        console.error("❌ Error completo:", emailError);
+        console.log("✅ Email enviado a", email);
+      } else {
+        console.log("⚠️  Email no enviado (transporter o FRONTEND_URL no disponible)");
       }
+    } catch (emailError) {
+      console.error("❌ Error email:", emailError.message);
+    }
 
     res.json({
       success: true,
@@ -81,6 +88,7 @@ router.post("/registro", async (req, res) => {
     if (err.code === 11000) {
       return res.status(409).json({ error: "El email ya está registrado" });
     }
+    console.error("❌ Error registro:", err);
     res.status(500).json({ error: "Error del servidor" });
   }
 });
@@ -88,35 +96,25 @@ router.post("/registro", async (req, res) => {
 // =============================================
 // LOGIN
 // =============================================
-// En LOGIN - verificar isVerified
 router.post("/login", async (req, res) => {
   const { email, password } = req.body;
 
   try {
     const user = await User.findOne({ email });
-    if (!user) {
-      return res.status(401).json({ error: "Credenciales incorrectas" });
-    }
+    if (!user) return res.status(401).json({ error: "Credenciales incorrectas" });
 
-    // ✅ VERIFICAR SI EL EMAIL ESTÁ CONFIRMADO
     if (!user.isVerified) {
       return res.status(403).json({
         error: "Cuenta no verificada",
-        needsVerification: true,  // ← Para el frontend
+        needsVerification: true,
         message: "Revisa tu email para verificar la cuenta"
       });
     }
 
     const ok = await bcrypt.compare(password, user.password);
-    if (!ok) {
-      return res.status(401).json({ error: "Credenciales incorrectas" });
-    }
+    if (!ok) return res.status(401).json({ error: "Credenciales incorrectas" });
 
-    const token = jwt.sign(
-      { userId: user._id.toString() },
-      JWT_SECRET,
-      { expiresIn: "7d" }
-    );
+    const token = jwt.sign({ userId: user._id.toString() }, JWT_SECRET, { expiresIn: "7d" });
 
     res.json({
       success: true,
@@ -140,11 +138,8 @@ router.post("/login", async (req, res) => {
 router.get("/perfil", authMiddleware, async (req, res) => {
   try {
     const user = await User.findById(req.user.userId).select("-password");
-
-    if (!user) {
-      return res.status(404).json({ error: "Usuario no encontrado" });
-    }
-
+    if (!user) return res.status(404).json({ error: "Usuario no encontrado" });
+    
     res.json({ success: true, usuario: user });
   } catch (err) {
     console.error(err);
@@ -159,10 +154,7 @@ router.put("/perfil", authMiddleware, async (req, res) => {
   try {
     const { nombre } = req.body;
     const user = await User.findById(req.user.userId);
-
-    if (!user) {
-      return res.status(404).json({ error: "Usuario no encontrado" });
-    }
+    if (!user) return res.status(404).json({ error: "Usuario no encontrado" });
 
     if (nombre) {
       user.nombre = nombre;
