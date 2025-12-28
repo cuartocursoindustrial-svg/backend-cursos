@@ -5,6 +5,7 @@ const bcrypt = require("bcryptjs");
 const crypto = require("crypto");
 
 const User = require("../models/User.cjs");
+const createTransporter = require("../config/mailer.cjs"); 
 const router = express.Router();
 
 const JWT_SECRET = process.env.JWT_SECRET;
