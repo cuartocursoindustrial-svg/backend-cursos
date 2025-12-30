@@ -142,102 +142,184 @@ router.post("/registro", async (req, res) => {
 // =============================================
 // VERIFICAR EMAIL
 // =============================================
-// routes/auth.cjs - en la ruta /verify-email, AÑADE ESTE LOGGING:
 
 router.get("/verify-email", async (req, res) => {
   const { token } = req.query;
 
-  console.log('🔐 [VERIFY-EMAIL] Token recibido:', token);
-  console.log('🔐 [VERIFY-EMAIL] BLOGGER_URL:', process.env.BLOGGER_URL);
-  console.log('🔐 [VERIFY-EMAIL] FRONTEND_URL:', process.env.FRONTEND_URL);
+  console.log('🔐 [VERIFY-EMAIL] Iniciando verificación...');
+  console.log('🔐 [VERIFY-EMAIL] Token recibido:', token ? 'SÍ' : 'NO');
 
   if (!token) {
     console.log('❌ [VERIFY-EMAIL] No hay token');
-    return res.status(400).json({ error: "Token de verificación requerido" });
+    return res.status(400).json({ 
+      error: "Token de verificación requerido",
+      code: "NO_TOKEN"
+    });
   }
 
   try {
-    // Verificar el token
-    const decoded = jwt.verify(token, JWT_SECRET);
-    console.log('✅ [VERIFY-EMAIL] Token decodificado:', decoded);
-    
-    if (decoded.purpose !== 'email_verification') {
-      console.log('❌ [VERIFY-EMAIL] Token con propósito incorrecto:', decoded.purpose);
-      return res.status(400).json({ error: "Token inválido" });
-    }
-
-    // Buscar usuario con este token
-    const user = await User.findOne({ 
-      email: decoded.email,
-      verificationToken: token
-    });
-
-    console.log('🔍 [VERIFY-EMAIL] Usuario encontrado:', user ? 'SÍ' : 'NO');
-    
-    if (user) {
-      console.log('🔍 [VERIFY-EMAIL] Estado actual:', {
-        isVerified: user.isVerified,
-        tokenExpires: user.verificationTokenExpires,
-        ahora: new Date(),
-        tokenValido: user.verificationTokenExpires > new Date()
-      });
-    }
-
-    if (!user) {
-      console.log('❌ [VERIFY-EMAIL] Usuario no encontrado con ese token');
+    // 1. PRIMERO: Decodificar el token (aunque esté expirado)
+    let decoded;
+    try {
+      decoded = jwt.verify(token, JWT_SECRET);
+      console.log('✅ [VERIFY-EMAIL] Token JWT válido');
+    } catch (jwtError) {
+      console.log('⚠️ [VERIFY-EMAIL] Error JWT:', jwtError.name);
+      
+      if (jwtError.name === 'TokenExpiredError') {
+        // Token expirado pero podemos extraer el email
+        try {
+          const payload = jwt.decode(token); // Decodificar SIN verificar
+          if (payload && payload.email) {
+            console.log('📧 [VERIFY-EMAIL] Email del token expirado:', payload.email);
+            
+            // Buscar usuario por EMAIL
+            const userByEmail = await User.findOne({ email: payload.email });
+            
+            if (userByEmail && userByEmail.isVerified) {
+              console.log('✅ [VERIFY-EMAIL] Usuario ya verificado (token expirado)');
+              return res.status(200).json({
+                success: true,
+                alreadyVerified: true,
+                message: "Tu cuenta ya estaba verificada",
+                usuario: {
+                  email: userByEmail.email,
+                  nombre: userByEmail.nombre,
+                  isVerified: true
+                }
+              });
+            }
+          }
+        } catch (decodeError) {
+          console.error('❌ Error decodificando token:', decodeError);
+        }
+      }
+      
       return res.status(400).json({ 
         error: "Token inválido o expirado",
-        code: "TOKEN_EXPIRED"
+        code: "INVALID_TOKEN",
+        expired: jwtError.name === 'TokenExpiredError'
       });
     }
 
-    // Verificar si el token expiró
+    // 2. VERIFICAR PROPÓSITO DEL TOKEN
+    if (decoded.purpose !== 'email_verification') {
+      console.log('❌ [VERIFY-EMAIL] Propósito incorrecto:', decoded.purpose);
+      return res.status(400).json({ 
+        error: "Token inválido",
+        code: "WRONG_PURPOSE"
+      });
+    }
+
+    // 3. BUSCAR USUARIO POR EMAIL (NO POR TOKEN)
+    console.log('🔍 [VERIFY-EMAIL] Buscando usuario por email:', decoded.email);
+    const user = await User.findOne({ email: decoded.email });
+
+    if (!user) {
+      console.log('❌ [VERIFY-EMAIL] Usuario no encontrado con email:', decoded.email);
+      return res.status(400).json({ 
+        error: "Usuario no encontrado",
+        code: "USER_NOT_FOUND"
+      });
+    }
+
+    console.log('🔍 [VERIFY-EMAIL] Estado del usuario:', {
+      email: user.email,
+      isVerified: user.isVerified,
+      tieneToken: !!user.verificationToken,
+      tokenActual: user.verificationToken?.substring(0, 20) + '...',
+      tokenSolicitado: token.substring(0, 20) + '...',
+      tokensCoinciden: user.verificationToken === token
+    });
+
+    // 4. CASO 1: USUARIO YA VERIFICADO
+    if (user.isVerified) {
+      console.log('✅ [VERIFY-EMAIL] Usuario YA verificado anteriormente');
+      
+      // Verificar si el token actual coincide (aunque no sea necesario)
+      const tokenCoincide = user.verificationToken === token;
+      console.log('🔐 [VERIFY-EMAIL] Tokens coinciden?:', tokenCoincide);
+      
+      return res.status(200).json({
+        success: true,
+        alreadyVerified: true,
+        message: tokenCoincide 
+          ? "Tu cuenta ya estaba verificada con este enlace" 
+          : "Tu cuenta ya está verificada",
+        usuario: {
+          email: user.email,
+          nombre: user.nombre,
+          isVerified: true,
+          fechaRegistro: user.fechaRegistro
+        }
+      });
+    }
+
+    // 5. CASO 2: TOKEN NO COINCIDE (posible enlace viejo)
+    if (user.verificationToken !== token) {
+      console.log('⚠️ [VERIFY-EMAIL] Token no coincide. Usuario tiene token diferente');
+      
+      // Verificar si tiene otro token activo
+      if (user.verificationToken && user.verificationTokenExpires > new Date()) {
+        console.log('🔐 [VERIFY-EMAIL] Tiene otro token activo');
+        return res.status(400).json({ 
+          error: "Este enlace ya no es válido. Se generó uno nuevo",
+          code: "TOKEN_REPLACED",
+          needsNewLink: true
+        });
+      }
+      
+      // Token antiguo y no verificado
+      console.log('⏰ [VERIFY-EMAIL] Token antiguo expirado');
+      return res.status(400).json({ 
+        error: "Este enlace ha expirado. Solicita uno nuevo",
+        code: "TOKEN_EXPIRED",
+        expired: true
+      });
+    }
+
+    // 6. CASO 3: TOKEN EXPIRADO EN DB
     if (user.verificationTokenExpires < new Date()) {
-      console.log('❌ [VERIFY-EMAIL] Token expirado:', {
-        expira: user.verificationTokenExpires,
-        ahora: new Date()
+      console.log('⏰ [VERIFY-EMAIL] Token expirado en BD');
+      return res.status(400).json({ 
+        error: "El enlace de verificación ha expirado",
+        code: "TOKEN_EXPIRED_DB",
+        expired: true
       });
-      const bloggerExpiredUrl = `${process.env.BLOGGER_URL || process.env.FRONTEND_URL}/p/verification-expired.html`;
-      return res.redirect(bloggerExpiredUrl);
     }
 
-    // Marcar como verificado
-    console.log('🔄 [VERIFY-EMAIL] Actualizando usuario a verificado...');
+    // 7. CASO 4: ¡TOKEN VÁLIDO! VERIFICAR USUARIO
+    console.log('✅ [VERIFY-EMAIL] Token válido, verificando usuario...');
+    
     user.isVerified = true;
-    user.verificationToken = null;
+    user.verificationToken = null;  // <-- Aquí se elimina
     user.verificationTokenExpires = null;
+    user.ultimoAcceso = new Date();
     await user.save();
     
-    console.log('✅ [VERIFY-EMAIL] Email verificado para:', user.email);
-    console.log('✅ [VERIFY-EMAIL] Nuevo estado isVerified:', user.isVerified);
+    console.log('🎉 [VERIFY-EMAIL] ¡Usuario verificado exitosamente!');
 
-    // Verificar después de guardar
-    const userVerificado = await User.findById(user._id);
-    console.log('🔍 [VERIFY-EMAIL] Confirmación BD - isVerified:', userVerificado.isVerified);
+    return res.status(200).json({
+      success: true,
+      message: "¡Correo verificado exitosamente!",
+      verified: true,
+      usuario: {
+        email: user.email,
+        nombre: user.nombre,
+        isVerified: true,
+        fechaRegistro: user.fechaRegistro
+      }
+    });
 
-    // Redireccionar a página de éxito
-    const bloggerSuccessUrl = `${process.env.BLOGGER_URL || process.env.FRONTEND_URL}/p/verification-success.html`;
-    console.log('🔗 [VERIFY-EMAIL] Redirigiendo a:', bloggerSuccessUrl);
+  } catch (error) {
+    console.error('❌ [VERIFY-EMAIL] Error inesperado:', error.message);
+    console.error('❌ [VERIFY-EMAIL] Stack:', error.stack);
     
-    res.redirect(bloggerSuccessUrl);
-
-  } catch (err) {
-    console.error("❌ [VERIFY-EMAIL] Error completo:", err.message);
-    console.error("❌ [VERIFY-EMAIL] Stack:", err.stack);
-    
-    if (err.name === 'TokenExpiredError') {
-      console.log('⏰ [VERIFY-EMAIL] Token expirado JWT');
-      const bloggerExpiredUrl = `${process.env.BLOGGER_URL || process.env.FRONTEND_URL}/p/verification-expired.html`;
-      return res.redirect(bloggerExpiredUrl);
-    }
-    
-    if (err.name === 'JsonWebTokenError') {
-      console.log('🔐 [VERIFY-EMAIL] Error JWT:', err.message);
-    }
-    
-    const bloggerErrorUrl = `${process.env.BLOGGER_URL || process.env.FRONTEND_URL}/p/verification-error.html`;
-    console.log('🔗 [VERIFY-EMAIL] Redirigiendo a error:', bloggerErrorUrl);
-    res.redirect(bloggerErrorUrl);
+    return res.status(500).json({ 
+      error: "Error interno del servidor",
+      code: "INTERNAL_ERROR",
+      message: error.message
+    });
   }
 });
 
