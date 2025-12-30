@@ -302,73 +302,187 @@ router.post("/resend-verification", async (req, res) => {
 // ===============================================
 // Temporal
 // ===============================================
-// routes/auth.cjs - añade esta ruta nueva para pruebas
+// routes/auth.cjs - MODIFICAR la ruta /verify-email
+router.get("/verify-email", async (req, res) => {
+  const { token, format } = req.query;
 
-router.get("/verify-email-direct", async (req, res) => {
-  const { token } = req.query;
-
-  console.log('🔐 [DIRECT] Verificación directa con token:', token);
+  console.log('🔐 [VERIFY-EMAIL] Token recibido:', token);
+  console.log('🔐 [VERIFY-EMAIL] Formato solicitado:', format || 'html');
 
   if (!token) {
-    return res.status(400).json({ error: "Token requerido" });
+    if (format === 'json') {
+      return res.status(400).json({ error: "Token de verificación requerido" });
+    }
+    console.log('❌ No hay token');
+    return res.redirect(`${process.env.FRONTEND_URL || ''}/error?message=Token requerido`);
   }
 
   try {
+    // Verificar el token JWT
     const decoded = jwt.verify(token, JWT_SECRET);
+    console.log('✅ Token decodificado:', decoded);
     
     if (decoded.purpose !== 'email_verification') {
-      return res.status(400).json({ error: "Token inválido" });
+      if (format === 'json') {
+        return res.status(400).json({ 
+          error: "Token inválido",
+          invalidPurpose: true
+        });
+      }
+      return res.redirect(`${process.env.FRONTEND_URL || ''}/error?message=Token inválido`);
     }
 
-    const user = await User.findOne({ 
+    // BUSCAR USUARIO DE 3 MANERAS:
+    // 1. Primero buscar por token activo
+    let user = await User.findOne({ 
       email: decoded.email,
       verificationToken: token,
       verificationTokenExpires: { $gt: new Date() }
     });
 
+    // 2. Si no, buscar por token (aunque esté expirado)
     if (!user) {
-      return res.status(400).json({ 
-        error: "Token inválido o expirado",
-        code: "TOKEN_EXPIRED"
+      user = await User.findOne({ 
+        email: decoded.email,
+        verificationToken: token
       });
+      
+      if (user) {
+        console.log('⚠️ Token encontrado pero posiblemente expirado');
+        
+        // 3. VERIFICAR SI YA ESTÁ VERIFICADO
+        if (user.isVerified) {
+          console.log('✅ Usuario YA verificado anteriormente');
+          
+          if (format === 'json') {
+            return res.status(200).json({
+              success: true,
+              alreadyVerified: true, // ¡IMPORTANTE!
+              message: "Tu cuenta ya estaba verificada anteriormente",
+              usuario: {
+                email: user.email,
+                nombre: user.nombre,
+                isVerified: true
+              }
+            });
+          }
+          
+          // Redirigir a página de "ya verificado"
+          return res.redirect(`${process.env.FRONTEND_URL || ''}/already-verified.html`);
+        }
+        
+        // Token expirado y no verificado
+        if (format === 'json') {
+          return res.status(400).json({ 
+            error: "El enlace de verificación ha expirado",
+            expired: true,
+            needsNewToken: true
+          });
+        }
+        
+        return res.redirect(`${process.env.FRONTEND_URL || ''}/verification-expired.html`);
+      }
     }
 
-    // Actualizar
+    // 4. Si llegamos aquí, token no encontrado
+    if (!user) {
+      // ¿Quizás el usuario ya está verificado sin token?
+      const verifiedUser = await User.findOne({ 
+        email: decoded.email,
+        isVerified: true
+      });
+      
+      if (verifiedUser) {
+        console.log('✅ Usuario ya verificado (sin token activo)');
+        
+        if (format === 'json') {
+          return res.status(200).json({
+            success: true,
+            alreadyVerified: true,
+            message: "Tu cuenta ya está verificada",
+            usuario: {
+              email: verifiedUser.email,
+              nombre: verifiedUser.nombre
+            }
+          });
+        }
+        
+        return res.redirect(`${process.env.FRONTEND_URL || ''}/already-verified.html`);
+      }
+      
+      if (format === 'json') {
+        return res.status(400).json({ 
+          error: "Token inválido o usuario no encontrado",
+          invalidToken: true
+        });
+      }
+      
+      return res.redirect(`${process.env.FRONTEND_URL || ''}/error?message=Token inválido`);
+    }
+
+    // 5. ¡TOKEN VÁLIDO! Marcar como verificado
+    console.log('🔄 Actualizando usuario a verificado...');
     user.isVerified = true;
     user.verificationToken = null;
     user.verificationTokenExpires = null;
     await user.save();
+    
+    console.log('✅ Email verificado para:', user.email);
 
-    // Verificar
-    const updatedUser = await User.findById(user._id);
-
-    res.json({
-      success: true,
-      message: "Email verificado correctamente",
-      usuario: {
-        email: updatedUser.email,
-        nombre: updatedUser.nombre,
-        isVerified: updatedUser.isVerified
-      },
-      debug: {
-        tokenDecoded: decoded,
-        antes: {
+    // 6. Respuesta según formato
+    if (format === 'json') {
+      return res.status(200).json({
+        success: true,
+        message: "¡Correo verificado exitosamente!",
+        verified: true,
+        usuario: {
           email: user.email,
-          isVerified: user.isVerified
-        },
-        despues: {
-          email: updatedUser.email,
-          isVerified: updatedUser.isVerified
+          nombre: user.nombre,
+          isVerified: true
         }
-      }
-    });
+      });
+    }
+    
+    // Redirección HTML por defecto
+    const successUrl = `${process.env.FRONTEND_URL || process.env.BLOGGER_URL || ''}/verification-success.html`;
+    console.log('🔗 Redirigiendo a:', successUrl);
+    res.redirect(successUrl);
 
   } catch (err) {
-    res.status(400).json({
-      error: err.message,
-      name: err.name,
-      expired: err.name === 'TokenExpiredError'
-    });
+    console.error("❌ Error completo:", err.message);
+    
+    // Manejar errores JWT específicos
+    if (err.name === 'TokenExpiredError') {
+      if (format === 'json') {
+        return res.status(400).json({ 
+          error: "El enlace de verificación ha expirado",
+          expired: true,
+          needsNewToken: true
+        });
+      }
+      return res.redirect(`${process.env.FRONTEND_URL || ''}/verification-expired.html`);
+    }
+    
+    if (err.name === 'JsonWebTokenError') {
+      if (format === 'json') {
+        return res.status(400).json({ 
+          error: "Token de verificación inválido",
+          invalidToken: true
+        });
+      }
+      return res.redirect(`${process.env.FRONTEND_URL || ''}/error?message=Token inválido`);
+    }
+    
+    // Error genérico
+    if (format === 'json') {
+      return res.status(500).json({ 
+        error: "Error interno del servidor",
+        message: err.message
+      });
+    }
+    
+    const errorUrl = `${process.env.FRONTEND_URL || ''}/verification-error.html`;
+    res.redirect(errorUrl);
   }
 });
 
