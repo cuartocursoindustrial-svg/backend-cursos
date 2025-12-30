@@ -1,4 +1,4 @@
-// models/User.cjs - VERSIÓN CORREGIDA
+// models/User.cjs - VERSIÓN ACTUALIZADA CON VERIFICACIÓN
 const mongoose = require("mongoose");
 
 const userSchema = new mongoose.Schema({
@@ -34,10 +34,20 @@ const userSchema = new mongoose.Schema({
     type: Date,
     default: Date.now
   },
-  avatarInicial: {
+  avatar: {
     type: String,
-    default: "U"
-  }
+    default: function() {
+      return this.nombre ? this.nombre.charAt(0).toUpperCase() : "U";
+    }
+  },
+  // NUEVOS CAMPOS PARA VERIFICACIÓN
+  isVerified: {
+    type: Boolean,
+    default: false
+  },
+  verificationToken: String,
+  verificationTokenExpires: Date,
+  verificationSentAt: Date
 }, {
   timestamps: true
 });
