@@ -142,56 +142,101 @@ router.post("/registro", async (req, res) => {
 // =============================================
 // VERIFICAR EMAIL
 // =============================================
+// routes/auth.cjs - en la ruta /verify-email, AÑADE ESTE LOGGING:
+
 router.get("/verify-email", async (req, res) => {
   const { token } = req.query;
 
+  console.log('🔐 [VERIFY-EMAIL] Token recibido:', token);
+  console.log('🔐 [VERIFY-EMAIL] BLOGGER_URL:', process.env.BLOGGER_URL);
+  console.log('🔐 [VERIFY-EMAIL] FRONTEND_URL:', process.env.FRONTEND_URL);
+
   if (!token) {
+    console.log('❌ [VERIFY-EMAIL] No hay token');
     return res.status(400).json({ error: "Token de verificación requerido" });
   }
 
   try {
     // Verificar el token
     const decoded = jwt.verify(token, JWT_SECRET);
+    console.log('✅ [VERIFY-EMAIL] Token decodificado:', decoded);
     
     if (decoded.purpose !== 'email_verification') {
+      console.log('❌ [VERIFY-EMAIL] Token con propósito incorrecto:', decoded.purpose);
       return res.status(400).json({ error: "Token inválido" });
     }
 
     // Buscar usuario con este token
     const user = await User.findOne({ 
       email: decoded.email,
-      verificationToken: token,
-      verificationTokenExpires: { $gt: new Date() } // Token no expirado
+      verificationToken: token
     });
 
+    console.log('🔍 [VERIFY-EMAIL] Usuario encontrado:', user ? 'SÍ' : 'NO');
+    
+    if (user) {
+      console.log('🔍 [VERIFY-EMAIL] Estado actual:', {
+        isVerified: user.isVerified,
+        tokenExpires: user.verificationTokenExpires,
+        ahora: new Date(),
+        tokenValido: user.verificationTokenExpires > new Date()
+      });
+    }
+
     if (!user) {
+      console.log('❌ [VERIFY-EMAIL] Usuario no encontrado con ese token');
       return res.status(400).json({ 
         error: "Token inválido o expirado",
         code: "TOKEN_EXPIRED"
       });
     }
 
+    // Verificar si el token expiró
+    if (user.verificationTokenExpires < new Date()) {
+      console.log('❌ [VERIFY-EMAIL] Token expirado:', {
+        expira: user.verificationTokenExpires,
+        ahora: new Date()
+      });
+      const bloggerExpiredUrl = `${process.env.BLOGGER_URL || process.env.FRONTEND_URL}/p/verification-expired.html`;
+      return res.redirect(bloggerExpiredUrl);
+    }
+
     // Marcar como verificado
+    console.log('🔄 [VERIFY-EMAIL] Actualizando usuario a verificado...');
     user.isVerified = true;
     user.verificationToken = null;
     user.verificationTokenExpires = null;
     await user.save();
+    
+    console.log('✅ [VERIFY-EMAIL] Email verificado para:', user.email);
+    console.log('✅ [VERIFY-EMAIL] Nuevo estado isVerified:', user.isVerified);
 
-    console.log('✅ Email verificado para:', user.email);
+    // Verificar después de guardar
+    const userVerificado = await User.findById(user._id);
+    console.log('🔍 [VERIFY-EMAIL] Confirmación BD - isVerified:', userVerificado.isVerified);
 
-    // Redireccionar a página de éxito en Blogger
-    const bloggerSuccessUrl = `${process.env.BLOGGER_URL}/p/verification-success.html`;
+    // Redireccionar a página de éxito
+    const bloggerSuccessUrl = `${process.env.BLOGGER_URL || process.env.FRONTEND_URL}/p/verification-success.html`;
+    console.log('🔗 [VERIFY-EMAIL] Redirigiendo a:', bloggerSuccessUrl);
+    
     res.redirect(bloggerSuccessUrl);
 
   } catch (err) {
-    console.error("Error en verificación:", err.message);
+    console.error("❌ [VERIFY-EMAIL] Error completo:", err.message);
+    console.error("❌ [VERIFY-EMAIL] Stack:", err.stack);
     
     if (err.name === 'TokenExpiredError') {
-      const bloggerExpiredUrl = `${process.env.BLOGGER_URL}/p/verification-expired.html`;
+      console.log('⏰ [VERIFY-EMAIL] Token expirado JWT');
+      const bloggerExpiredUrl = `${process.env.BLOGGER_URL || process.env.FRONTEND_URL}/p/verification-expired.html`;
       return res.redirect(bloggerExpiredUrl);
     }
     
-    const bloggerErrorUrl = `${process.env.BLOGGER_URL}/p/verification-error.html`;
+    if (err.name === 'JsonWebTokenError') {
+      console.log('🔐 [VERIFY-EMAIL] Error JWT:', err.message);
+    }
+    
+    const bloggerErrorUrl = `${process.env.BLOGGER_URL || process.env.FRONTEND_URL}/p/verification-error.html`;
+    console.log('🔗 [VERIFY-EMAIL] Redirigiendo a error:', bloggerErrorUrl);
     res.redirect(bloggerErrorUrl);
   }
 });
@@ -252,6 +297,78 @@ router.post("/resend-verification", async (req, res) => {
   } catch (err) {
     console.error("Error reenviando verificación:", err);
     res.status(500).json({ error: "Error en el servidor" });
+  }
+});
+// ===============================================
+// Temporal
+// ===============================================
+// routes/auth.cjs - añade esta ruta nueva para pruebas
+
+router.get("/verify-email-direct", async (req, res) => {
+  const { token } = req.query;
+
+  console.log('🔐 [DIRECT] Verificación directa con token:', token);
+
+  if (!token) {
+    return res.status(400).json({ error: "Token requerido" });
+  }
+
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET);
+    
+    if (decoded.purpose !== 'email_verification') {
+      return res.status(400).json({ error: "Token inválido" });
+    }
+
+    const user = await User.findOne({ 
+      email: decoded.email,
+      verificationToken: token,
+      verificationTokenExpires: { $gt: new Date() }
+    });
+
+    if (!user) {
+      return res.status(400).json({ 
+        error: "Token inválido o expirado",
+        code: "TOKEN_EXPIRED"
+      });
+    }
+
+    // Actualizar
+    user.isVerified = true;
+    user.verificationToken = null;
+    user.verificationTokenExpires = null;
+    await user.save();
+
+    // Verificar
+    const updatedUser = await User.findById(user._id);
+
+    res.json({
+      success: true,
+      message: "Email verificado correctamente",
+      usuario: {
+        email: updatedUser.email,
+        nombre: updatedUser.nombre,
+        isVerified: updatedUser.isVerified
+      },
+      debug: {
+        tokenDecoded: decoded,
+        antes: {
+          email: user.email,
+          isVerified: user.isVerified
+        },
+        despues: {
+          email: updatedUser.email,
+          isVerified: updatedUser.isVerified
+        }
+      }
+    });
+
+  } catch (err) {
+    res.status(400).json({
+      error: err.message,
+      name: err.name,
+      expired: err.name === 'TokenExpiredError'
+    });
   }
 });
 
