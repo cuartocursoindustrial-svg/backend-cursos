@@ -310,56 +310,6 @@ function requireVerifiedEmail(req, res, next) {
   next();
 }
 
-// =============================================
-// RUTA PARA VERIFICAR ESTADO DE VERIFICACIÓN
-// =============================================
-router.get("/check-verification", authMiddleware, async (req, res) => {
-  try {
-    const user = await User.findById(req.user.userId).select('isVerified email');
-    
-    if (!user) {
-      return res.status(404).json({ error: "Usuario no encontrado" });
-    }
-
-    res.json({
-      success: true,
-      isVerified: user.isVerified,
-      email: user.email,
-      needsVerification: !user.isVerified
-    });
-  } catch (err) {
-    console.error("Error verificando estado:", err);
-    res.status(500).json({ error: "Error en el servidor" });
-  }
-});
 
 // ... (el resto de tus rutas existentes se mantienen igual) ...
 // Solo añade esto al final, antes de module.exports:
-
-// =============================================
-// TEST EMAIL (para desarrollo)
-// =============================================
-if (process.env.NODE_ENV !== 'production') {
-  router.post("/test-email", async (req, res) => {
-    const { email, nombre } = req.body;
-    
-    if (!email || !nombre) {
-      return res.status(400).json({ error: "Email y nombre requeridos" });
-    }
-    
-    try {
-      const testToken = jwt.sign(
-        { email, purpose: 'test' },
-        JWT_SECRET,
-        { expiresIn: '1h' }
-      );
-      
-      await emailService.sendVerificationEmail(email, nombre, testToken);
-      res.json({ success: true, message: "Email de prueba enviado" });
-    } catch (error) {
-      res.status(500).json({ error: error.message });
-    }
-  });
-}
-
-module.exports = router;
