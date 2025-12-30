@@ -11,6 +11,58 @@ const JWT_SECRET = process.env.JWT_SECRET || "clave-super-secreta";
 const VERIFICATION_TOKEN_EXPIRY = '24h'; // 24 horas para verificar
 
 // =============================================
+// MIDDLEWARE DE AUTENTICACIÓN - ¡¡¡AÑADE ESTO!!!
+// =============================================
+function authMiddleware(req, res, next) {
+  const authHeader = req.headers.authorization;
+  
+  console.log('🔐 Headers recibidos:', req.headers);
+  console.log('🔐 Authorization header:', authHeader);
+  
+  if (!authHeader) {
+    console.log('❌ No hay header Authorization');
+    return res.status(401).json({ error: "Token de autorización requerido" });
+  }
+
+  // Verificar que tenga formato "Bearer {token}"
+  const parts = authHeader.split(' ');
+  if (parts.length !== 2 || parts[0] !== 'Bearer') {
+    console.log('❌ Formato de token inválido:', authHeader);
+    return res.status(401).json({ error: "Formato de token inválido. Use: Bearer {token}" });
+  }
+
+  const token = parts[1];
+  console.log('🔐 Token recibido:', token.substring(0, 20) + '...');
+
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET);
+    console.log('✅ Token decodificado:', decoded);
+    
+    // Asegurarnos de que req.user tenga userId
+    req.user = {
+      userId: decoded.userId || decoded.id || decoded._id,
+      email: decoded.email,
+      nombre: decoded.nombre,
+      avatar: decoded.avatar,
+      isVerified: decoded.isVerified || false
+    };
+    
+    console.log('✅ Usuario extraído:', req.user);
+    next();
+  } catch (err) {
+    console.error("❌ Error JWT:", err.message);
+    
+    if (err.name === 'TokenExpiredError') {
+      return res.status(401).json({ error: "Token expirado" });
+    }
+    
+    return res.status(403).json({ error: "Token inválido: " + err.message });
+  }
+}
+
+
+
+// =============================================
 // REGISTRO DE USUARIO CON VERIFICACIÓN
 // =============================================
 router.post("/registro", async (req, res) => {
