@@ -1,14 +1,14 @@
 // services/EmailService.cjs
 const mailjet = require('node-mailjet').apiConnect(
-  process.env.MAILJET_API_KEY,
-  process.env.MAILJET_SECRET_KEY
+  process.env.MJ_APIKEY_PUBLIC,      // ← Usa esta (ya la tienes)
+  process.env.MJ_APIKEY_PRIVATE      // ← Usa esta (ya la tienes)
 );
 
 class EmailService {
   constructor() {
-    this.senderEmail = process.env.MAILJET_SENDER_EMAIL;
-    this.senderName = process.env.MAILJET_SENDER_NAME;
-    this.frontendVerifyUrl = process.env.FRONTEND_VERIFY_URL;
+    this.senderEmail = process.env.EMAIL_FROM;        // ← Usa esta (ya la tienes)
+    this.senderName = process.env.MAILJET_SENDER_NAME || 'Academia Ohara';
+    this.frontendVerifyUrl = process.env.FRONTEND_URL + '/p/verify-email.html';
   }
 
   async sendVerificationEmail(userEmail, userName, verificationToken) {
@@ -113,9 +113,8 @@ El equipo de Academia Ohara
     } catch (error) {
       console.error('❌ Error enviando email de verificación:', error.message);
       
-      // Si Mailjet falla, al menos loguear el enlace para desarrollo
+      // Si Mailjet falla, loguear para desarrollo
       if (process.env.NODE_ENV !== 'production') {
-        const verificationLink = `${this.frontendVerifyUrl}?token=${verificationToken}`;
         console.log('🔗 Enlace de verificación (para desarrollo):', verificationLink);
       }
       
