@@ -8,7 +8,7 @@ class EmailService {
   constructor() {
     this.senderEmail = process.env.EMAIL_FROM;        // ← Usa esta (ya la tienes)
     this.senderName = process.env.MAILJET_SENDER_NAME || 'Academia Ohara';
-    this.frontendVerifyUrl = process.env.FRONTEND_URL + '/p/verify-email.html';
+    this.frontendVerifyUrl = process.env.FRONTEND_URL + '/p/verificar-email.html';
   }
 
   async sendVerificationEmail(userEmail, userName, verificationToken) {
@@ -124,3 +124,4 @@ El equipo de Academia Ohara
 }
 
 module.exports = new EmailService();
+
