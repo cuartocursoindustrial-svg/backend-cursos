@@ -310,6 +310,282 @@ function requireVerifiedEmail(req, res, next) {
   next();
 }
 
+// ... (todo el código que ya tienes) ...
 
-// ... (el resto de tus rutas existentes se mantienen igual) ...
-// Solo añade esto al final, antes de module.exports:
+// =============================================
+// RUTA PARA VERIFICAR ESTADO DE VERIFICACIÓN
+// =============================================
+router.get("/check-verification", authMiddleware, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.userId).select('isVerified email');
+    
+    if (!user) {
+      return res.status(404).json({ error: "Usuario no encontrado" });
+    }
+
+    res.json({
+      success: true,
+      isVerified: user.isVerified,
+      email: user.email,
+      needsVerification: !user.isVerified
+    });
+  } catch (err) {
+    console.error("Error verificando estado:", err);
+    res.status(500).json({ error: "Error en el servidor" });
+  }
+});
+
+// =============================================
+// TEST EMAIL (para desarrollo)
+// =============================================
+if (process.env.NODE_ENV !== 'production') {
+  router.post("/test-email", async (req, res) => {
+    const { email, nombre } = req.body;
+    
+    if (!email || !nombre) {
+      return res.status(400).json({ error: "Email y nombre requeridos" });
+    }
+    
+    try {
+      const testToken = jwt.sign(
+        { email, purpose: 'test' },
+        JWT_SECRET,
+        { expiresIn: '1h' }
+      );
+      
+      await emailService.sendVerificationEmail(email, nombre, testToken);
+      res.json({ success: true, message: "Email de prueba enviado" });
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+}
+
+// =============================================
+// PERFIL DEL USUARIO (Tu ruta existente - debe estar aquí)
+// =============================================
+router.get("/perfil", authMiddleware, async (req, res) => {
+  console.log('📋 Solicitando perfil para userId:', req.user.userId);
+  
+  try {
+    const user = await User.findById(req.user.userId)
+      .select('-password') // Excluir contraseña
+    
+    if (!user) {
+      console.log('❌ Usuario no encontrado en BD:', req.user.userId);
+      return res.status(404).json({ error: "Usuario no encontrado" });
+    }
+
+    console.log('✅ Perfil encontrado:', user.email, 'Cursos:', user.cursosComprados.length);
+
+    res.json({
+      success: true,
+      usuario: {
+        nombre: user.nombre,
+        email: user.email,
+        userId: user._id.toString(),
+        avatar: user.avatar,
+        cursosComprados: user.cursosComprados || [],
+        cursosCompletados: user.cursosCompletados || [],
+        fechaRegistro: user.fechaRegistro,
+        ultimoAcceso: user.ultimoAcceso
+      }
+    });
+  } catch (err) {
+    console.error("❌ Error en /perfil:", err);
+    res.status(500).json({ error: "Error al obtener perfil" });
+  }
+});
+
+// =============================================
+// AGREGAR CURSO COMPRADO (Tu ruta existente)
+// =============================================
+router.post("/agregar-curso", authMiddleware, async (req, res) => {
+  const { cursoId } = req.body;
+  
+  console.log('🛒 Agregando curso:', {
+    userId: req.user.userId,
+    cursoId: cursoId
+  });
+
+  if (!cursoId) {
+    return res.status(400).json({ error: "ID de curso requerido" });
+  }
+
+  try {
+    const user = await User.findById(req.user.userId);
+    
+    if (!user) {
+      return res.status(404).json({ error: "Usuario no encontrado" });
+    }
+
+    // Verificar si el curso ya está comprado
+    if (user.cursosComprados.includes(cursoId)) {
+      console.log('ℹ️ Curso ya comprado:', cursoId);
+      return res.json({
+        success: true,
+        message: "Ya tienes este curso comprado",
+        cursosComprados: user.cursosComprados
+      });
+    }
+
+    // Agregar el curso
+    user.cursosComprados.push(cursoId);
+    await user.save();
+    
+    console.log('✅ Curso agregado exitosamente. Total cursos:', user.cursosComprados.length);
+
+    res.json({
+      success: true,
+      message: "Curso agregado a tu cuenta",
+      cursosComprados: user.cursosComprados,
+      totalCursos: user.cursosComprados.length
+    });
+  } catch (err) {
+    console.error("❌ Error agregando curso:", err);
+    res.status(500).json({ error: "Error al agregar curso" });
+  }
+});
+
+// =============================================
+// MARCAR CURSO COMO COMPLETADO (Tu ruta existente)
+// =============================================
+router.post("/completar-curso", authMiddleware, async (req, res) => {
+  const { cursoId } = req.body;
+
+  if (!cursoId) {
+    return res.status(400).json({ error: "ID de curso requerido" });
+  }
+
+  try {
+    const user = await User.findById(req.user.userId);
+    
+    if (!user) {
+      return res.status(404).json({ error: "Usuario no encontrado" });
+    }
+
+    // Verificar que el curso esté comprado
+    if (!user.cursosComprados.includes(cursoId)) {
+      return res.status(400).json({ error: "No tienes este curso comprado" });
+    }
+
+    // Verificar si ya está completado
+    if (user.cursosCompletados.includes(cursoId)) {
+      return res.json({
+        success: true,
+        message: "El curso ya estaba marcado como completado",
+        cursosCompletados: user.cursosCompletados
+      });
+    }
+
+    // Agregar a completados
+    user.cursosCompletados.push(cursoId);
+    await user.save();
+
+    res.json({
+      success: true,
+      message: "Curso marcado como completado",
+      cursosCompletados: user.cursosCompletados
+    });
+  } catch (err) {
+    console.error("Error completando curso:", err);
+    res.status(500).json({ error: "Error al completar curso" });
+  }
+});
+
+// =============================================
+// FUNCIONES DE PROGRESO (Tus rutas existentes)
+// =============================================
+router.post("/progreso", authMiddleware, async (req, res) => {
+  const { cursoId, leccionId } = req.body;
+
+  if (!cursoId || !leccionId) {
+    return res.status(400).json({ error: "Faltan datos" });
+  }
+
+  try {
+    let progreso = await Progress.findOne({
+      userId: req.user.userId,
+      cursoId
+    });
+
+    if (!progreso) {
+      progreso = new Progress({
+        userId: req.user.userId,
+        cursoId,
+        leccionesVistas: [leccionId],
+        ultimaLeccion: leccionId
+      });
+    } else {
+      if (!progreso.leccionesVistas.includes(leccionId)) {
+        progreso.leccionesVistas.push(leccionId);
+      }
+      progreso.ultimaLeccion = leccionId;
+    }
+
+    await progreso.save();
+
+    res.json({ 
+      success: true,
+      mensaje: "Progreso guardado",
+      progreso
+    });
+  } catch (err) {
+    console.error("Error guardando progreso:", err);
+    res.status(500).json({ error: "Error al guardar progreso" });
+  }
+});
+
+router.get("/progreso/:cursoId", authMiddleware, async (req, res) => {
+  try {
+    const { cursoId } = req.params;
+
+    const progreso = await Progress.findOne({
+      userId: req.user.userId,
+      cursoId
+    });
+
+    if (!progreso) {
+      return res.json({
+        success: true,
+        cursoId,
+        leccionesVistas: [],
+        ultimaLeccion: null
+      });
+    }
+
+    res.json({
+      success: true,
+      cursoId: progreso.cursoId,
+      leccionesVistas: progreso.leccionesVistas,
+      ultimaLeccion: progreso.ultimaLeccion,
+      totalLeccionesVistas: progreso.leccionesVistas.length
+    });
+  } catch (err) {
+    console.error("Error leyendo progreso:", err);
+    res.status(500).json({ error: "Error al obtener progreso" });
+  }
+});
+
+// =============================================
+// RUTA DE PRUEBA (para verificar que el servidor funciona)
+// =============================================
+router.get("/test", (req, res) => {
+  res.json({
+    success: true,
+    message: "API de autenticación funcionando",
+    timestamp: new Date().toISOString(),
+    endpoints: [
+      "POST /api/auth/registro",
+      "POST /api/auth/login", 
+      "GET /api/auth/perfil",
+      "POST /api/auth/agregar-curso",
+      "POST /api/auth/completar-curso"
+    ]
+  });
+});
+
+// =============================================
+// ¡¡¡ESTO ES LO QUE FALTA!!! - EXPORTACIÓN
+// =============================================
+module.exports = router;
