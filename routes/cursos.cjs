@@ -4,7 +4,7 @@ const router = express.Router();
 const jwt = require("jsonwebtoken");
 const Curso = require("../models/Curso.cjs");
 const Compra = require("../models/Compra.cjs");
-const Usuario = require("../models/Usuario.cjs"); // ✅ Necesario para los nuevos endpoints
+const Usuario = require("../models/User.cjs"); // ✅ Necesario para los nuevos endpoints
 
 const JWT_SECRET = process.env.JWT_SECRET || "clave-super-secreta";
 
