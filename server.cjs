@@ -84,12 +84,11 @@ app.use((req, res, next) => {
 });
 
 // RUTA DE PRUEBA MEJORADA
-// server.cjs - actualiza la ruta "/" (líneas ~60-90)
-
+// En server.cjs, actualiza la ruta "/"
 app.get("/", (req, res) => {
   res.json({
     message: "🚀 API Academia Ohara - Backend Funcionando",
-    version: "2.1.0", // Incrementa la versión
+    version: "2.0.0",
     status: "online",
     environment: process.env.NODE_ENV || 'development',
     endpoints: {
@@ -97,16 +96,8 @@ app.get("/", (req, res) => {
         registro: "POST /api/auth/registro",
         login: "POST /api/auth/login",
         perfil: "GET /api/auth/perfil",
-        agregarCurso: "POST /api/auth/agregar-curso",
+        agregarCurso: "POST /api/auth/agregar-curso",  // ← AÑADE ESTA
         completarCurso: "POST /api/auth/completar-curso",
-        // ✅ AÑADE ESTAS NUEVAS RUTAS:
-        verifyEmail: "GET /api/auth/verify-email?token={token}",
-        resendVerification: "POST /api/auth/resend-verification",
-        checkVerification: "GET /api/auth/check-verification (requiere auth)",
-        // Test email (solo desarrollo)
-        ...(process.env.NODE_ENV !== 'production' && {
-          testEmail: "POST /api/auth/test-email (solo desarrollo)"
-        }),
         progreso: {
           guardar: "POST /api/auth/progreso",
           obtener: "GET /api/auth/progreso/:cursoId"
@@ -121,11 +112,6 @@ app.get("/", (req, res) => {
     timestamp: new Date().toISOString(),
     cors: {
       allowed: process.env.NODE_ENV === 'production' ? 'Blogger domains only' : 'All origins (dev)'
-    },
-    features: {
-      emailVerification: true,
-      requireVerification: true,
-      mailjetIntegration: true
     }
   });
 });
