@@ -951,6 +951,15 @@ router.get("/test", (req, res) => {
 });
 
 // =============================================
+// ¡¡¡EXPORTAR MIDDLEWARE PARA USAR EN OTRAS RUTAS!!!
+// =============================================
+module.exports = {
+  router,
+  authMiddleware,  // ← ¡ESTO ES IMPORTANTE!
+  requireVerifiedEmail  // ← Si quieres usar este también
+};
+
+// =============================================
 // ¡¡¡ESTO ES LO QUE FALTA!!! - EXPORTACIÓN
 // =============================================
 module.exports = router;
