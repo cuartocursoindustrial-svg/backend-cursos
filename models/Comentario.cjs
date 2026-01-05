@@ -1,3 +1,4 @@
+// models/Comentario.cjs - VERSIÓN CORREGIDA
 const mongoose = require('mongoose');
 
 const respuestaSchema = new mongoose.Schema({
@@ -9,7 +10,6 @@ const respuestaSchema = new mongoose.Schema({
     usuario: {
         id: {
             type: mongoose.Schema.Types.ObjectId,
-            ref: 'User',
             required: true
         },
         nombre: {
@@ -44,7 +44,6 @@ const comentarioSchema = new mongoose.Schema({
     usuario: {
         id: {
             type: mongoose.Schema.Types.ObjectId,
-            ref: 'User',
             required: true
         },
         nombre: {
