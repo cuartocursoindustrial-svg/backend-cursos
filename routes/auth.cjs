@@ -959,7 +959,3 @@ module.exports = {
   requireVerifiedEmail  // ← Si quieres usar este también
 };
 
-// =============================================
-// ¡¡¡ESTO ES LO QUE FALTA!!! - EXPORTACIÓN
-// =============================================
-module.exports = router;
