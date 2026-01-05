@@ -1,17 +1,17 @@
-// routes/auth.cjs - VERSIÓN CON VERIFICACIÓN
+// routes/auth.cjs - VERSIÓN CORREGIDA Y COMPLETA
 const express = require("express");
 const jwt = require("jsonwebtoken");
 const bcrypt = require("bcryptjs");
 const User = require("../models/User.cjs");
 const Progress = require("../models/Progress.cjs");
-const emailService = require("../services/EmailService.cjs"); // NUEVO
+const emailService = require("../services/EmailService.cjs");
 
 const router = express.Router();
 const JWT_SECRET = process.env.JWT_SECRET || "clave-super-secreta";
-const VERIFICATION_TOKEN_EXPIRY = '24h'; // 24 horas para verificar
+const VERIFICATION_TOKEN_EXPIRY = '24h';
 
 // =============================================
-// MIDDLEWARE DE AUTENTICACIÓN - ¡¡¡AÑADE ESTO!!!
+// 1. MIDDLEWARE DE AUTENTICACIÓN
 // =============================================
 function authMiddleware(req, res, next) {
   const authHeader = req.headers.authorization;
@@ -24,7 +24,6 @@ function authMiddleware(req, res, next) {
     return res.status(401).json({ error: "Token de autorización requerido" });
   }
 
-  // Verificar que tenga formato "Bearer {token}"
   const parts = authHeader.split(' ');
   if (parts.length !== 2 || parts[0] !== 'Bearer') {
     console.log('❌ Formato de token inválido:', authHeader);
@@ -38,7 +37,6 @@ function authMiddleware(req, res, next) {
     const decoded = jwt.verify(token, JWT_SECRET);
     console.log('✅ Token decodificado:', decoded);
     
-    // Asegurarnos de que req.user tenga userId
     req.user = {
       userId: decoded.userId || decoded.id || decoded._id,
       email: decoded.email,
@@ -60,11 +58,25 @@ function authMiddleware(req, res, next) {
   }
 }
 
-
+// =============================================
+// 2. MIDDLEWARE PARA EMAIL VERIFICADO
+// =============================================
+function requireVerifiedEmail(req, res, next) {
+  if (!req.user.isVerified) {
+    return res.status(403).json({
+      error: "Email no verificado",
+      code: "EMAIL_VERIFICATION_REQUIRED",
+      message: "Por favor verifica tu correo electrónico para acceder a esta función"
+    });
+  }
+  next();
+}
 
 // =============================================
+// 3. RUTAS PÚBLICAS (sin autenticación)
+// =============================================
+
 // REGISTRO DE USUARIO CON VERIFICACIÓN
-// =============================================
 router.post("/registro", async (req, res) => {
   const { nombre, email, password } = req.body;
 
@@ -90,7 +102,7 @@ router.post("/registro", async (req, res) => {
       // Campos de verificación
       isVerified: false,
       verificationToken,
-      verificationTokenExpires: new Date(Date.now() + 24 * 60 * 60 * 1000), // 24 horas
+      verificationTokenExpires: new Date(Date.now() + 24 * 60 * 60 * 1000),
       verificationSentAt: new Date()
     });
 
@@ -102,16 +114,15 @@ router.post("/registro", async (req, res) => {
       console.log('✅ Email de verificación enviado a:', email);
     } catch (emailError) {
       console.error('⚠️ Error enviando email, pero usuario creado:', emailError.message);
-      // Continuamos aunque falle el email, el usuario puede solicitar reenvío
     }
 
-    // Crear token de sesión (pero con restricciones hasta verificación)
+    // Crear token de sesión
     const sessionTokenPayload = {
       email: user.email,
       nombre: user.nombre,
       userId: user._id.toString(),
       avatar: user.avatar,
-      isVerified: false // IMPORTANTE: indicar que no está verificado
+      isVerified: false
     };
     
     const sessionToken = jwt.sign(sessionTokenPayload, JWT_SECRET, { expiresIn: "7d" });
@@ -125,7 +136,7 @@ router.post("/registro", async (req, res) => {
         email: user.email,
         userId: user._id.toString(),
         avatar: user.avatar,
-        isVerified: false, // NUEVO
+        isVerified: false,
         cursosComprados: user.cursosComprados || [],
         cursosCompletados: user.cursosCompletados || []
       }
@@ -139,252 +150,7 @@ router.post("/registro", async (req, res) => {
   }
 });
 
-// =============================================
-// VERIFICAR EMAIL
-// =============================================
-
-router.get("/verify-email", async (req, res) => {
-  const { token } = req.query;
-
-  console.log('🔐 [VERIFY-EMAIL] Iniciando verificación...');
-  console.log('🔐 [VERIFY-EMAIL] Token recibido:', token ? 'SÍ' : 'NO');
-
-  if (!token) {
-    console.log('❌ [VERIFY-EMAIL] No hay token');
-    return res.status(400).json({ 
-      error: "Token de verificación requerido",
-      code: "NO_TOKEN"
-    });
-  }
-
-  try {
-    // 1. PRIMERO: Decodificar el token (aunque esté expirado)
-    let decoded;
-    try {
-      decoded = jwt.verify(token, JWT_SECRET);
-      console.log('✅ [VERIFY-EMAIL] Token JWT válido');
-    } catch (jwtError) {
-      console.log('⚠️ [VERIFY-EMAIL] Error JWT:', jwtError.name);
-      
-      if (jwtError.name === 'TokenExpiredError') {
-        // Token expirado pero podemos extraer el email
-        try {
-          const payload = jwt.decode(token); // Decodificar SIN verificar
-          if (payload && payload.email) {
-            console.log('📧 [VERIFY-EMAIL] Email del token expirado:', payload.email);
-            
-            // Buscar usuario por EMAIL
-            const userByEmail = await User.findOne({ email: payload.email });
-            
-            if (userByEmail && userByEmail.isVerified) {
-              console.log('✅ [VERIFY-EMAIL] Usuario ya verificado (token expirado)');
-              return res.status(200).json({
-                success: true,
-                alreadyVerified: true,
-                message: "Tu cuenta ya estaba verificada",
-                usuario: {
-                  email: userByEmail.email,
-                  nombre: userByEmail.nombre,
-                  isVerified: true
-                }
-              });
-            }
-          }
-        } catch (decodeError) {
-          console.error('❌ Error decodificando token:', decodeError);
-        }
-      }
-      
-      return res.status(400).json({ 
-        error: "Token inválido o expirado",
-        code: "INVALID_TOKEN",
-        expired: jwtError.name === 'TokenExpiredError'
-      });
-    }
-
-    // 2. VERIFICAR PROPÓSITO DEL TOKEN
-    if (decoded.purpose !== 'email_verification') {
-      console.log('❌ [VERIFY-EMAIL] Propósito incorrecto:', decoded.purpose);
-      return res.status(400).json({ 
-        error: "Token inválido",
-        code: "WRONG_PURPOSE"
-      });
-    }
-
-    // 3. BUSCAR USUARIO POR EMAIL (NO POR TOKEN)
-    console.log('🔍 [VERIFY-EMAIL] Buscando usuario por email:', decoded.email);
-    const user = await User.findOne({ email: decoded.email });
-
-    if (!user) {
-      console.log('❌ [VERIFY-EMAIL] Usuario no encontrado con email:', decoded.email);
-      return res.status(400).json({ 
-        error: "Usuario no encontrado",
-        code: "USER_NOT_FOUND"
-      });
-    }
-
-    console.log('🔍 [VERIFY-EMAIL] Estado del usuario:', {
-      email: user.email,
-      isVerified: user.isVerified,
-      tieneToken: !!user.verificationToken,
-      tokenActual: user.verificationToken?.substring(0, 20) + '...',
-      tokenSolicitado: token.substring(0, 20) + '...',
-      tokensCoinciden: user.verificationToken === token
-    });
-
-    // 4. CASO 1: USUARIO YA VERIFICADO
-    if (user.isVerified) {
-      console.log('✅ [VERIFY-EMAIL] Usuario YA verificado anteriormente');
-      
-      // Verificar si el token actual coincide (aunque no sea necesario)
-      const tokenCoincide = user.verificationToken === token;
-      console.log('🔐 [VERIFY-EMAIL] Tokens coinciden?:', tokenCoincide);
-      
-      return res.status(200).json({
-        success: true,
-        alreadyVerified: true,
-        message: tokenCoincide 
-          ? "Tu cuenta ya estaba verificada con este enlace" 
-          : "Tu cuenta ya está verificada",
-        usuario: {
-          email: user.email,
-          nombre: user.nombre,
-          isVerified: true,
-          fechaRegistro: user.fechaRegistro
-        }
-      });
-    }
-
-    // 5. CASO 2: TOKEN NO COINCIDE (posible enlace viejo)
-    if (user.verificationToken !== token) {
-      console.log('⚠️ [VERIFY-EMAIL] Token no coincide. Usuario tiene token diferente');
-      
-      // Verificar si tiene otro token activo
-      if (user.verificationToken && user.verificationTokenExpires > new Date()) {
-        console.log('🔐 [VERIFY-EMAIL] Tiene otro token activo');
-        return res.status(400).json({ 
-          error: "Este enlace ya no es válido. Se generó uno nuevo",
-          code: "TOKEN_REPLACED",
-          needsNewLink: true
-        });
-      }
-      
-      // Token antiguo y no verificado
-      console.log('⏰ [VERIFY-EMAIL] Token antiguo expirado');
-      return res.status(400).json({ 
-        error: "Este enlace ha expirado. Solicita uno nuevo",
-        code: "TOKEN_EXPIRED",
-        expired: true
-      });
-    }
-
-    // 6. CASO 3: TOKEN EXPIRADO EN DB
-    if (user.verificationTokenExpires < new Date()) {
-      console.log('⏰ [VERIFY-EMAIL] Token expirado en BD');
-      return res.status(400).json({ 
-        error: "El enlace de verificación ha expirado",
-        code: "TOKEN_EXPIRED_DB",
-        expired: true
-      });
-    }
-
-    // 7. CASO 4: ¡TOKEN VÁLIDO! VERIFICAR USUARIO
-    console.log('✅ [VERIFY-EMAIL] Token válido, verificando usuario...');
-    
-    user.isVerified = true;
-    user.verificationToken = null;  // <-- Aquí se elimina
-    user.verificationTokenExpires = null;
-    user.ultimoAcceso = new Date();
-    await user.save();
-    
-    console.log('🎉 [VERIFY-EMAIL] ¡Usuario verificado exitosamente!');
-
-    return res.status(200).json({
-      success: true,
-      message: "¡Correo verificado exitosamente!",
-      verified: true,
-      usuario: {
-        email: user.email,
-        nombre: user.nombre,
-        isVerified: true,
-        fechaRegistro: user.fechaRegistro
-      }
-    });
-
-  } catch (error) {
-    console.error('❌ [VERIFY-EMAIL] Error inesperado:', error.message);
-    console.error('❌ [VERIFY-EMAIL] Stack:', error.stack);
-    
-    return res.status(500).json({ 
-      error: "Error interno del servidor",
-      code: "INTERNAL_ERROR",
-      message: error.message
-    });
-  }
-});
-
-// =============================================
-// REENVIAR EMAIL DE VERIFICACIÓN
-// =============================================
-router.post("/resend-verification", async (req, res) => {
-  const { email } = req.body;
-
-  if (!email) {
-    return res.status(400).json({ error: "Email requerido" });
-  }
-
-  try {
-    const user = await User.findOne({ email });
-    
-    if (!user) {
-      return res.status(404).json({ error: "Usuario no encontrado" });
-    }
-
-    if (user.isVerified) {
-      return res.status(400).json({ error: "El usuario ya está verificado" });
-    }
-
-    // Verificar si ya envió un email recientemente (evitar spam)
-    const timeSinceLastEmail = user.verificationSentAt 
-      ? Date.now() - user.verificationSentAt.getTime()
-      : Infinity;
-    
-    if (timeSinceLastEmail < 5 * 60 * 1000) { // 5 minutos
-      return res.status(429).json({ 
-        error: "Espera 5 minutos antes de solicitar otro email" 
-      });
-    }
-
-    // Generar nuevo token
-    const verificationToken = jwt.sign(
-      { email: user.email, purpose: 'email_verification' },
-      JWT_SECRET,
-      { expiresIn: VERIFICATION_TOKEN_EXPIRY }
-    );
-
-    // Actualizar usuario
-    user.verificationToken = verificationToken;
-    user.verificationTokenExpires = new Date(Date.now() + 24 * 60 * 60 * 1000);
-    user.verificationSentAt = new Date();
-    await user.save();
-
-    // Enviar email
-    await emailService.sendVerificationEmail(user.email, user.nombre, verificationToken);
-
-    res.json({ 
-      success: true,
-      message: "Email de verificación reenviado" 
-    });
-
-  } catch (err) {
-    console.error("Error reenviando verificación:", err);
-    res.status(500).json({ error: "Error en el servidor" });
-  }
-});
-// ===============================================
-// Temporal
-// ===============================================
-// routes/auth.cjs - MODIFICAR la ruta /verify-email
+// VERIFICAR EMAIL (SÓLO UNA VERSIÓN - la más completa)
 router.get("/verify-email", async (req, res) => {
   const { token, format } = req.query;
 
@@ -439,7 +205,7 @@ router.get("/verify-email", async (req, res) => {
           if (format === 'json') {
             return res.status(200).json({
               success: true,
-              alreadyVerified: true, // ¡IMPORTANTE!
+              alreadyVerified: true,
               message: "Tu cuenta ya estaba verificada anteriormente",
               usuario: {
                 email: user.email,
@@ -449,7 +215,6 @@ router.get("/verify-email", async (req, res) => {
             });
           }
           
-          // Redirigir a página de "ya verificado"
           return res.redirect(`${process.env.FRONTEND_URL || ''}/already-verified.html`);
         }
         
@@ -568,9 +333,64 @@ router.get("/verify-email", async (req, res) => {
   }
 });
 
-// =============================================
-// LOGIN ACTUALIZADO (verifica si el email está confirmado)
-// =============================================
+// REENVIAR EMAIL DE VERIFICACIÓN
+router.post("/resend-verification", async (req, res) => {
+  const { email } = req.body;
+
+  if (!email) {
+    return res.status(400).json({ error: "Email requerido" });
+  }
+
+  try {
+    const user = await User.findOne({ email });
+    
+    if (!user) {
+      return res.status(404).json({ error: "Usuario no encontrado" });
+    }
+
+    if (user.isVerified) {
+      return res.status(400).json({ error: "El usuario ya está verificado" });
+    }
+
+    // Verificar si ya envió un email recientemente
+    const timeSinceLastEmail = user.verificationSentAt 
+      ? Date.now() - user.verificationSentAt.getTime()
+      : Infinity;
+    
+    if (timeSinceLastEmail < 5 * 60 * 1000) {
+      return res.status(429).json({ 
+        error: "Espera 5 minutos antes de solicitar otro email" 
+      });
+    }
+
+    // Generar nuevo token
+    const verificationToken = jwt.sign(
+      { email: user.email, purpose: 'email_verification' },
+      JWT_SECRET,
+      { expiresIn: VERIFICATION_TOKEN_EXPIRY }
+    );
+
+    // Actualizar usuario
+    user.verificationToken = verificationToken;
+    user.verificationTokenExpires = new Date(Date.now() + 24 * 60 * 60 * 1000);
+    user.verificationSentAt = new Date();
+    await user.save();
+
+    // Enviar email
+    await emailService.sendVerificationEmail(user.email, user.nombre, verificationToken);
+
+    res.json({ 
+      success: true,
+      message: "Email de verificación reenviado" 
+    });
+
+  } catch (err) {
+    console.error("Error reenviando verificación:", err);
+    res.status(500).json({ error: "Error en el servidor" });
+  }
+});
+
+// LOGIN
 router.post("/login", async (req, res) => {
   const { email, password } = req.body;
   console.log('🔑 Intento de login para:', email);
@@ -592,13 +412,11 @@ router.post("/login", async (req, res) => {
     if (!user.isVerified) {
       console.log('⚠️ Usuario no verificado intentando login:', email);
       
-      // Verificar si el token de verificación expiró
       const needsNewToken = !user.verificationToken || 
                            !user.verificationTokenExpires || 
                            user.verificationTokenExpires < new Date();
       
       if (needsNewToken) {
-        // Generar nuevo token de verificación
         const verificationToken = jwt.sign(
           { email: user.email, purpose: 'email_verification' },
           JWT_SECRET,
@@ -610,7 +428,6 @@ router.post("/login", async (req, res) => {
         user.verificationSentAt = new Date();
         await user.save();
         
-        // Enviar nuevo email
         await emailService.sendVerificationEmail(user.email, user.nombre, verificationToken);
       }
 
@@ -633,7 +450,7 @@ router.post("/login", async (req, res) => {
       nombre: user.nombre,
       userId: user._id.toString(),
       avatar: user.avatar,
-      isVerified: true // NUEVO
+      isVerified: true
     };
     
     const token = jwt.sign(tokenPayload, JWT_SECRET, { expiresIn: "7d" });
@@ -649,7 +466,7 @@ router.post("/login", async (req, res) => {
         email: user.email,
         userId: user._id.toString(),
         avatar: user.avatar,
-        isVerified: true, // NUEVO
+        isVerified: true,
         cursosComprados: user.cursosComprados || [],
         cursosCompletados: user.cursosCompletados || []
       }
@@ -661,25 +478,10 @@ router.post("/login", async (req, res) => {
 });
 
 // =============================================
-// MIDDLEWARE PARA VERIFICAR EMAIL (opcional, para rutas protegidas)
+// 4. RUTAS PROTEGIDAS (requieren autenticación)
 // =============================================
-function requireVerifiedEmail(req, res, next) {
-  // Este middleware se puede usar en rutas que requieran email verificado
-  if (!req.user.isVerified) {
-    return res.status(403).json({
-      error: "Email no verificado",
-      code: "EMAIL_VERIFICATION_REQUIRED",
-      message: "Por favor verifica tu correo electrónico para acceder a esta función"
-    });
-  }
-  next();
-}
 
-// ... (todo el código que ya tienes) ...
-
-// =============================================
-// RUTA PARA VERIFICAR ESTADO DE VERIFICACIÓN
-// =============================================
+// VERIFICAR ESTADO DE VERIFICACIÓN
 router.get("/check-verification", authMiddleware, async (req, res) => {
   try {
     const user = await User.findById(req.user.userId).select('isVerified email');
@@ -700,41 +502,13 @@ router.get("/check-verification", authMiddleware, async (req, res) => {
   }
 });
 
-// =============================================
-// TEST EMAIL (para desarrollo)
-// =============================================
-if (process.env.NODE_ENV !== 'production') {
-  router.post("/test-email", async (req, res) => {
-    const { email, nombre } = req.body;
-    
-    if (!email || !nombre) {
-      return res.status(400).json({ error: "Email y nombre requeridos" });
-    }
-    
-    try {
-      const testToken = jwt.sign(
-        { email, purpose: 'test' },
-        JWT_SECRET,
-        { expiresIn: '1h' }
-      );
-      
-      await emailService.sendVerificationEmail(email, nombre, testToken);
-      res.json({ success: true, message: "Email de prueba enviado" });
-    } catch (error) {
-      res.status(500).json({ error: error.message });
-    }
-  });
-}
-
-// =============================================
-// PERFIL DEL USUARIO (Tu ruta existente - debe estar aquí)
-// =============================================
+// PERFIL DEL USUARIO (solo autenticación)
 router.get("/perfil", authMiddleware, async (req, res) => {
   console.log('📋 Solicitando perfil para userId:', req.user.userId);
   
   try {
     const user = await User.findById(req.user.userId)
-      .select('-password') // Excluir contraseña
+      .select('-password')
     
     if (!user) {
       console.log('❌ Usuario no encontrado en BD:', req.user.userId);
@@ -762,10 +536,8 @@ router.get("/perfil", authMiddleware, async (req, res) => {
   }
 });
 
-// =============================================
-// AGREGAR CURSO COMPRADO (Tu ruta existente)
-// =============================================
-router.post("/agregar-curso", authMiddleware, async (req, res) => {
+// AGREGAR CURSO COMPRADO (requiere email verificado)
+router.post("/agregar-curso", authMiddleware, requireVerifiedEmail, async (req, res) => {
   const { cursoId } = req.body;
   
   console.log('🛒 Agregando curso:', {
@@ -812,10 +584,8 @@ router.post("/agregar-curso", authMiddleware, async (req, res) => {
   }
 });
 
-// =============================================
-// MARCAR CURSO COMO COMPLETADO (Tu ruta existente)
-// =============================================
-router.post("/completar-curso", authMiddleware, async (req, res) => {
+// MARCAR CURSO COMO COMPLETADO (requiere email verificado)
+router.post("/completar-curso", authMiddleware, requireVerifiedEmail, async (req, res) => {
   const { cursoId } = req.body;
 
   if (!cursoId) {
@@ -858,10 +628,8 @@ router.post("/completar-curso", authMiddleware, async (req, res) => {
   }
 });
 
-// =============================================
-// FUNCIONES DE PROGRESO (Tus rutas existentes)
-// =============================================
-router.post("/progreso", authMiddleware, async (req, res) => {
+// FUNCIONES DE PROGRESO (requieren email verificado)
+router.post("/progreso", authMiddleware, requireVerifiedEmail, async (req, res) => {
   const { cursoId, leccionId } = req.body;
 
   if (!cursoId || !leccionId) {
@@ -901,7 +669,7 @@ router.post("/progreso", authMiddleware, async (req, res) => {
   }
 });
 
-router.get("/progreso/:cursoId", authMiddleware, async (req, res) => {
+router.get("/progreso/:cursoId", authMiddleware, requireVerifiedEmail, async (req, res) => {
   try {
     const { cursoId } = req.params;
 
@@ -933,8 +701,33 @@ router.get("/progreso/:cursoId", authMiddleware, async (req, res) => {
 });
 
 // =============================================
-// RUTA DE PRUEBA (para verificar que el servidor funciona)
+// 5. RUTAS DE DESARROLLO (solo en dev)
 // =============================================
+
+if (process.env.NODE_ENV !== 'production') {
+  router.post("/test-email", async (req, res) => {
+    const { email, nombre } = req.body;
+    
+    if (!email || !nombre) {
+      return res.status(400).json({ error: "Email y nombre requeridos" });
+    }
+    
+    try {
+      const testToken = jwt.sign(
+        { email, purpose: 'test' },
+        JWT_SECRET,
+        { expiresIn: '1h' }
+      );
+      
+      await emailService.sendVerificationEmail(email, nombre, testToken);
+      res.json({ success: true, message: "Email de prueba enviado" });
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+}
+
+// RUTA DE PRUEBA
 router.get("/test", (req, res) => {
   res.json({
     success: true,
@@ -951,11 +744,10 @@ router.get("/test", (req, res) => {
 });
 
 // =============================================
-// ¡¡¡EXPORTAR MIDDLEWARE PARA USAR EN OTRAS RUTAS!!!
+// 6. EXPORTACIONES
 // =============================================
 module.exports = {
   router,
-  authMiddleware,  // ← ¡ESTO ES IMPORTANTE!
-  requireVerifiedEmail  // ← Si quieres usar este también
+  authMiddleware,       // Para usar en otros archivos
+  requireVerifiedEmail  // Para usar en otros archivos
 };
-
