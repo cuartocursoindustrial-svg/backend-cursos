@@ -6,7 +6,7 @@ const mongoose = require("mongoose");
 const cors = require("cors");
 
 // Importar rutas
-const authRoutes = require("./routes/auth.cjs");
+const { router: authRoutes, authMiddleware } = require("./routes/auth.cjs");
 const cursoRoutes = require("./routes/cursos.cjs");
 const comentariosRoutes = require('./routes/comentarios.cjs');
 
