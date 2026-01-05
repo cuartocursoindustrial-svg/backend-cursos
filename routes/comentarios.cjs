@@ -1,62 +1,90 @@
-// routes/comentarios.cjs - VERSIÓN CORREGIDA
+// routes/comentarios.cjs - VERSIÓN MEJORADA
 const express = require("express");
 const router = express.Router();
 
-// CORRECCIÓN: Importar authMiddleware correctamente
-const authModule = require("./auth.cjs");
-const authMiddleware = authModule.authMiddleware;
+// Importar middleware correctamente (así está bien)
+const { authMiddleware, requireVerifiedEmail } = require("./auth.cjs");
 
-// Modelo de comentarios
+// Modelos
 const Comentario = require("../models/Comentario.cjs");
-const User = require("../models/User.cjs"); // Añadir esta línea
+const User = require("../models/User.cjs");
+
+// =============================================
+// MIDDLEWARE ESPECÍFICO PARA COMENTARIOS
+// =============================================
+function verificarAccesoCurso(req, res, next) {
+    // Este middleware verificará que el usuario tenga acceso al curso
+    // Se aplicará a rutas que crean/leen comentarios
+    next(); // Por ahora siempre pasa, pero puedes implementar lógica aquí
+}
 
 // =============================================
 // OBTENER COMENTARIOS DE UN VIDEO
 // =============================================
-router.get("/video/:videoId", authMiddleware, async (req, res) => {
+router.get("/video/:videoId", authMiddleware, verificarAccesoCurso, async (req, res) => {
     try {
         const { videoId } = req.params;
+        const userId = req.user.userId;
         
-        console.log('📝 Obteniendo comentarios para video:', videoId, 'Usuario:', req.user?.userId);
+        console.log('📝 Obteniendo comentarios para video:', videoId, 'Usuario:', userId);
+        
+        // Obtener comentarios con paginación básica
+        const page = parseInt(req.query.page) || 1;
+        const limit = parseInt(req.query.limit) || 20;
+        const skip = (page - 1) * limit;
         
         const comentarios = await Comentario.find({ videoId })
             .sort({ createdAt: -1 })
+            .skip(skip)
+            .limit(limit)
             .lean();
         
-        // Formatear respuesta para el frontend
+        // Obtener contador total
+        const totalComentarios = await Comentario.countDocuments({ videoId });
+        
+        // Formatear respuesta
         const comentariosFormateados = comentarios.map(comentario => ({
             _id: comentario._id,
-            id: comentario._id.toString(), // Para compatibilidad
+            id: comentario._id.toString(),
             videoId: comentario.videoId,
             contenido: comentario.contenido,
-            texto: comentario.contenido, // Alias para compatibilidad
+            texto: comentario.contenido,
             usuario: {
                 id: comentario.usuario.id,
                 nombre: comentario.usuario.nombre,
-                email: comentario.usuario.email
+                email: comentario.usuario.email,
+                avatar: comentario.usuario.avatar || comentario.usuario.nombre?.charAt(0).toUpperCase()
             },
             fecha: comentario.createdAt,
             createdAt: comentario.createdAt,
-            respuestas: comentario.respuestas || []
+            respuestas: comentario.respuestas || [],
+            puedeEliminar: comentario.usuario.id.toString() === userId.toString()
         }));
         
         res.json({ 
             success: true, 
-            comentarios: comentariosFormateados 
+            comentarios: comentariosFormateados,
+            paginacion: {
+                paginaActual: page,
+                totalPaginas: Math.ceil(totalComentarios / limit),
+                totalComentarios,
+                limite: limit
+            }
         });
     } catch (error) {
         console.error('❌ Error obteniendo comentarios:', error);
         res.status(500).json({ 
             success: false, 
-            message: 'Error al obtener comentarios' 
+            message: 'Error al obtener comentarios',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
         });
     }
 });
 
 // =============================================
-// CREAR NUEVO COMENTARIO
+// CREAR NUEVO COMENTARIO (requiere email verificado)
 // =============================================
-router.post("/", authMiddleware, async (req, res) => {
+router.post("/", authMiddleware, requireVerifiedEmail, async (req, res) => {
     try {
         const { videoId, contenido, cursoId } = req.body;
         const userId = req.user.userId;
@@ -68,6 +96,7 @@ router.post("/", authMiddleware, async (req, res) => {
             userId
         });
         
+        // Validaciones
         if (!videoId || !contenido) {
             return res.status(400).json({ 
                 success: false, 
@@ -82,7 +111,14 @@ router.post("/", authMiddleware, async (req, res) => {
             });
         }
         
-        // Buscar usuario para obtener datos
+        if (contenido.length > 1000) {
+            return res.status(400).json({ 
+                success: false, 
+                message: 'El comentario no puede exceder 1000 caracteres' 
+            });
+        }
+        
+        // Buscar usuario
         const user = await User.findById(userId);
         if (!user) {
             return res.status(404).json({ 
@@ -91,13 +127,13 @@ router.post("/", authMiddleware, async (req, res) => {
             });
         }
         
-        // Verificar que el usuario tenga acceso al curso
+        // Verificar acceso al curso (opcional, puedes ajustar esta lógica)
         const cursoAccesible = user.cursosComprados && 
                               user.cursosComprados.some(curso => 
                                   curso.toString() === (cursoId || '2')
                               );
         
-        if (!cursoAccesible) {
+        if (!cursoAccesible && process.env.NODE_ENV === 'production') {
             return res.status(403).json({ 
                 success: false, 
                 message: 'No tienes acceso a este curso' 
@@ -107,12 +143,13 @@ router.post("/", authMiddleware, async (req, res) => {
         // Crear comentario
         const nuevoComentario = new Comentario({
             videoId,
-            cursoId: cursoId || '2', // Por defecto álgebra
+            cursoId: cursoId || '2',
             contenido,
             usuario: {
                 id: user._id,
                 nombre: user.nombre,
-                email: user.email
+                email: user.email,
+                avatar: user.avatar || user.nombre.charAt(0).toUpperCase()
             }
         });
         
@@ -130,30 +167,34 @@ router.post("/", authMiddleware, async (req, res) => {
             usuario: {
                 id: user._id,
                 nombre: user.nombre,
-                email: user.email
+                email: user.email,
+                avatar: user.avatar || user.nombre.charAt(0).toUpperCase()
             },
             fecha: nuevoComentario.createdAt,
             createdAt: nuevoComentario.createdAt,
-            respuestas: []
+            respuestas: [],
+            puedeEliminar: true // El usuario puede eliminar su propio comentario
         };
         
         res.status(201).json({ 
             success: true, 
-            comentario: comentarioResponse 
+            comentario: comentarioResponse,
+            message: 'Comentario publicado exitosamente'
         });
     } catch (error) {
         console.error('❌ Error creando comentario:', error);
         res.status(500).json({ 
             success: false, 
-            message: 'Error al crear comentario' 
+            message: 'Error al crear comentario',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
         });
     }
 });
 
 // =============================================
-// AGREGAR RESPUESTA A COMENTARIO
+// AGREGAR RESPUESTA A COMENTARIO (requiere email verificado)
 // =============================================
-router.post("/:comentarioId/respuestas", authMiddleware, async (req, res) => {
+router.post("/:comentarioId/respuestas", authMiddleware, requireVerifiedEmail, async (req, res) => {
     try {
         const { contenido } = req.body;
         const { comentarioId } = req.params;
@@ -165,10 +206,25 @@ router.post("/:comentarioId/respuestas", authMiddleware, async (req, res) => {
             userId
         });
         
+        // Validaciones
         if (!contenido) {
             return res.status(400).json({ 
                 success: false, 
                 message: 'El contenido es requerido' 
+            });
+        }
+        
+        if (contenido.length < 2) {
+            return res.status(400).json({ 
+                success: false, 
+                message: 'La respuesta debe tener al menos 2 caracteres' 
+            });
+        }
+        
+        if (contenido.length > 500) {
+            return res.status(400).json({ 
+                success: false, 
+                message: 'La respuesta no puede exceder 500 caracteres' 
             });
         }
         
@@ -196,24 +252,33 @@ router.post("/:comentarioId/respuestas", authMiddleware, async (req, res) => {
             usuario: {
                 id: user._id,
                 nombre: user.nombre,
-                email: user.email
+                email: user.email,
+                avatar: user.avatar || user.nombre.charAt(0).toUpperCase()
             }
         };
         
         comentario.respuestas.push(nuevaRespuesta);
         await comentario.save();
         
+        // Obtener la respuesta recién creada con su ID
+        const respuestaCreada = comentario.respuestas[comentario.respuestas.length - 1];
+        
         console.log('✅ Respuesta agregada a comentario:', comentarioId);
         
         res.status(201).json({ 
             success: true, 
-            respuesta: nuevaRespuesta 
+            respuesta: {
+                ...respuestaCreada.toObject(),
+                puedeEliminar: true // El usuario puede eliminar su propia respuesta
+            },
+            message: 'Respuesta publicada exitosamente'
         });
     } catch (error) {
         console.error('❌ Error agregando respuesta:', error);
         res.status(500).json({ 
             success: false, 
-            message: 'Error al agregar respuesta' 
+            message: 'Error al agregar respuesta',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
         });
     }
 });
@@ -238,6 +303,8 @@ router.delete("/:comentarioId", authMiddleware, async (req, res) => {
         
         // Verificar que el usuario sea el dueño del comentario
         if (comentario.usuario.id.toString() !== userId.toString()) {
+            // Opcional: Podrías permitir que administradores también eliminen
+            // if (!req.user.esAdmin) {
             return res.status(403).json({ 
                 success: false, 
                 message: 'No tienes permiso para eliminar este comentario' 
@@ -250,13 +317,15 @@ router.delete("/:comentarioId", authMiddleware, async (req, res) => {
         
         res.json({ 
             success: true, 
-            message: 'Comentario eliminado exitosamente' 
+            message: 'Comentario eliminado exitosamente',
+            comentarioId
         });
     } catch (error) {
         console.error('❌ Error eliminando comentario:', error);
         res.status(500).json({ 
             success: false, 
-            message: 'Error al eliminar comentario' 
+            message: 'Error al eliminar comentario',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
         });
     }
 });
@@ -308,13 +377,49 @@ router.delete("/respuestas/:respuestaId", authMiddleware, async (req, res) => {
         
         res.json({ 
             success: true, 
-            message: 'Respuesta eliminada exitosamente' 
+            message: 'Respuesta eliminada exitosamente',
+            respuestaId,
+            comentarioId: comentario._id
         });
     } catch (error) {
         console.error('❌ Error eliminando respuesta:', error);
         res.status(500).json({ 
             success: false, 
-            message: 'Error al eliminar respuesta' 
+            message: 'Error al eliminar respuesta',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+});
+
+// =============================================
+// ESTADÍSTICAS DE COMENTARIOS (opcional)
+// =============================================
+router.get("/estadisticas/:videoId", authMiddleware, async (req, res) => {
+    try {
+        const { videoId } = req.params;
+        
+        const totalComentarios = await Comentario.countDocuments({ videoId });
+        
+        // Contar respuestas (sumar respuestas de todos los comentarios)
+        const comentarios = await Comentario.find({ videoId }).select('respuestas');
+        const totalRespuestas = comentarios.reduce((total, comentario) => {
+            return total + (comentario.respuestas?.length || 0);
+        }, 0);
+        
+        res.json({
+            success: true,
+            videoId,
+            estadisticas: {
+                totalComentarios,
+                totalRespuestas,
+                totalInteracciones: totalComentarios + totalRespuestas
+            }
+        });
+    } catch (error) {
+        console.error('❌ Error obteniendo estadísticas:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Error al obtener estadísticas'
         });
     }
 });
