@@ -8,6 +8,7 @@ const cors = require("cors");
 // Importar rutas
 const authRoutes = require("./routes/auth.cjs");
 const cursoRoutes = require("./routes/cursos.cjs");
+const comentariosRoutes = require('./routes/comentarios.cjs');
 
 const app = express();
 
@@ -96,7 +97,7 @@ app.get("/", (req, res) => {
         registro: "POST /api/auth/registro",
         login: "POST /api/auth/login",
         perfil: "GET /api/auth/perfil",
-        agregarCurso: "POST /api/auth/agregar-curso",  // ← AÑADE ESTA
+        agregarCurso: "POST /api/auth/agregar-curso",
         completarCurso: "POST /api/auth/completar-curso",
         progreso: {
           guardar: "POST /api/auth/progreso",
@@ -107,6 +108,14 @@ app.get("/", (req, res) => {
         todos: "GET /api/cursos",
         crear: "POST /api/cursos",
         detalle: "GET /api/cursos/:id"
+      },
+      comentarios: {  // ← AÑADE ESTA SECCIÓN
+        porVideo: "GET /api/comentarios/video/:videoId",
+        crear: "POST /api/comentarios",
+        agregarRespuesta: "POST /api/comentarios/:comentarioId/respuestas",
+        eliminar: "DELETE /api/comentarios/:comentarioId",
+        eliminarRespuesta: "DELETE /api/comentarios/respuestas/:respuestaId",
+        estadisticas: "GET /api/comentarios/estadisticas/:videoId"
       }
     },
     timestamp: new Date().toISOString(),
@@ -119,6 +128,7 @@ app.get("/", (req, res) => {
 // RUTAS
 app.use("/api/auth", authRoutes);
 app.use("/api/cursos", cursoRoutes);
+app.use('/api/comentarios', comentariosRoutes);
 
 // RUTA HEALTH CHECK
 app.get("/health", (req, res) => {
@@ -176,3 +186,4 @@ app.listen(PORT, () => {
   console.log(`🌍 Entorno: ${process.env.NODE_ENV || 'development'}`);
   console.log(`🔒 CORS: ${process.env.NODE_ENV === 'production' ? 'Solo Blogger' : 'Todos los orígenes'}`);
 });
+
