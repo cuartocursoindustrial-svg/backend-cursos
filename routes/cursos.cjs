@@ -153,26 +153,34 @@ router.post("/comprar", authMiddleware, async (req, res) => {
     }
     
     // 2. Verificar que no lo haya comprado antes
-    const compraExistente = await Compra.findOne({
-      usuarioId: req.user.userId,
-      cursoId: cursoId
+try {
+  const nuevaCompra = await Compra.create({
+    usuarioId: req.user.userId,
+    cursoId: cursoId,
+    precioPagado: curso.precio,
+    estado: 'completada'
+  });
+
+  return res.json({
+    success: true,
+    message: `Curso "${curso.titulo}" comprado exitosamente`,
+    curso: curso,
+    compraId: nuevaCompra._id,
+    fechaCompra: nuevaCompra.fechaCompra
+  });
+
+} catch (error) {
+  // 🔐 MongoDB bloqueó duplicado (usuarioId + cursoId)
+  if (error.code === 11000) {
+    return res.status(400).json({
+      success: false,
+      error: "Ya has comprado este curso"
     });
-    
-    if (compraExistente) {
-      return res.status(400).json({
-        success: false,
-        error: "Ya has comprado este curso"
-      });
-    }
-    
-    // 3. Crear la compra en MongoDB
-    const nuevaCompra = await Compra.create({
-      usuarioId: req.user.userId,
-      cursoId: cursoId,
-      precioPagado: curso.precio,
-      estado: 'completada'
-    });
-    
+  }
+
+  console.error("Error comprando curso:", error);
+  return res.status(500).json({ error: "Error al procesar la compra" });
+} 
     res.json({
       success: true,
       message: `Curso "${curso.titulo}" comprado exitosamente`,
