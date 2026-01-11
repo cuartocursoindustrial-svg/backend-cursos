@@ -675,8 +675,6 @@ function requireVerifiedEmail(req, res, next) {
   next();
 }
 
-// ... (todo el código que ya tienes) ...
-
 // =============================================
 // RUTA PARA VERIFICAR ESTADO DE VERIFICACIÓN
 // =============================================
@@ -767,45 +765,30 @@ router.get("/perfil", authMiddleware, async (req, res) => {
 // =============================================
 router.post("/agregar-curso", authMiddleware, async (req, res) => {
   const { cursoId } = req.body;
-  
-  console.log('🛒 Agregando curso:', {
-    userId: req.user.userId,
-    cursoId: cursoId
-  });
 
   if (!cursoId) {
     return res.status(400).json({ error: "ID de curso requerido" });
   }
 
   try {
-    const user = await User.findById(req.user.userId);
-    
-    if (!user) {
+    const result = await User.findByIdAndUpdate(
+      req.user.userId,
+      {
+        $addToSet: { cursosComprados: cursoId } // 🔐 anti-duplicados
+      },
+      { new: true } // devuelve el usuario actualizado
+    );
+
+    if (!result) {
       return res.status(404).json({ error: "Usuario no encontrado" });
     }
 
-    // Verificar si el curso ya está comprado
-    if (user.cursosComprados.includes(cursoId)) {
-      console.log('ℹ️ Curso ya comprado:', cursoId);
-      return res.json({
-        success: true,
-        message: "Ya tienes este curso comprado",
-        cursosComprados: user.cursosComprados
-      });
-    }
-
-    // Agregar el curso
-    user.cursosComprados.push(cursoId);
-    await user.save();
-    
-    console.log('✅ Curso agregado exitosamente. Total cursos:', user.cursosComprados.length);
-
     res.json({
       success: true,
-      message: "Curso agregado a tu cuenta",
-      cursosComprados: user.cursosComprados,
-      totalCursos: user.cursosComprados.length
+      cursosComprados: result.cursosComprados,
+      totalCursos: result.cursosComprados.length
     });
+
   } catch (err) {
     console.error("❌ Error agregando curso:", err);
     res.status(500).json({ error: "Error al agregar curso" });
